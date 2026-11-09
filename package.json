@@ -1,0 +1,23 @@
+{
+  "name": "nes-cljs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "dev": "clojure -M:dev -m shadow.cljs.devtools.cli watch app",
+    "release": "clojure -M:dev -m shadow.cljs.devtools.cli release app",
+    "bundle": "clojure -M:dev -m shadow.cljs.devtools.cli release bundle && node scripts/bundle.mjs",
+    "clean": "rm -rf resources/public/js",
+    "test": "clojure -M:dev:test -m shadow.cljs.devtools.cli compile test && node target/test/test.js",
+    "test:watch": "clojure -M:dev:test -m shadow.cljs.devtools.cli watch test"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "shadow-cljs": "^3.5.4"
+  },
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  }
+}

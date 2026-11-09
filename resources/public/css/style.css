@@ -1,0 +1,20 @@
+/* Site-wide styles. Components set most of their own styles inline (look
+   for :style maps in the .cljs files), but anything here applies everywhere. */
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #24292f;
+    background-color: #f6f8fa;
+}
+
+code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    /* long file paths can break onto the next line on narrow screens */
+    overflow-wrap: break-word;
+}
+
+/* Text boxes never grow wider than the space they're in */
+input, textarea {
+    max-width: 100%;
+}

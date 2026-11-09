@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Bacterium</title>
+  <rect width="32" height="32" rx="7" fill="#004a87"/>
+  <g transform="rotate(-30 16 16)">
+    <path d="M25 16 q2 -3 4 0" fill="none" stroke="#d8b9ff" stroke-width="2" stroke-linecap="round"/>
+    <rect x="4" y="10" width="22" height="12" rx="6" fill="#d8b9ff"/>
+    <path d="M9 16 q2 -3 4 0 t4 0 t4 0" fill="none" stroke="#7b4fa0" stroke-width="1.8" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Flask</title>
+  <rect width="32" height="32" rx="7" fill="#004a87"/>
+  <path d="M13 5 h6 v7 l6.5 11 a2 2 0 0 1 -1.7 3 h-15.6 a2 2 0 0 1 -1.7 -3 l6.5 -11 z" fill="#fff"/>
+  <path d="M9.7 19 h12.6 l3.2 4 a2 2 0 0 1 -1.7 3 h-15.6 a2 2 0 0 1 -1.7 -3 z" fill="#4ac26b"/>
+</svg>

@@ -1,0 +1,15 @@
+{:paths ["src/main" "resources"]
+ :deps {org.clojure/clojurescript {:mvn/version "1.12.145"}
+        org.clojure/core.async {:mvn/version "1.9.865"}
+        cljs-http/cljs-http {:mvn/version "0.1.48"}
+        reagent/reagent {:mvn/version "2.0.1"
+                         :exclusions [cljsjs/react cljsjs/react-dom]}
+        ;; For the in-browser editor (the :web build): SCI interprets
+        ;; ClojureScript typed into the page; sci.configs exposes Reagent to it.
+        org.babashka/sci {:mvn/version "0.15.59"}
+        io.github.babashka/sci.configs {:git/sha "f3ca6e2ddf59f4e79e2f07d977cae416949135c2"}}
+ :aliases {:dev {:extra-paths ["src/dev"]
+                 :extra-deps {thheller/shadow-cljs {:mvn/version "3.5.4"}
+                              binaryage/devtools {:mvn/version "1.0.7"}}}
+           :test {:extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
+                  :extra-paths ["src/test"]}}}

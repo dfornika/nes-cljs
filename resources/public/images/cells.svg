@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="320" height="200">
+  <title>Rod-shaped bacteria under a microscope (illustration)</title>
+  <rect width="320" height="200" rx="8" fill="#0b2a3a"/>
+  <circle cx="160" cy="100" r="92" fill="#e8f4f8"/>
+  <g fill="#7b4fa0" opacity="0.85">
+    <rect x="100" y="60" width="44" height="14" rx="7" transform="rotate(-20 122 67)"/>
+    <rect x="160" y="50" width="40" height="13" rx="6.5" transform="rotate(35 180 56)"/>
+    <rect x="120" y="100" width="46" height="14" rx="7" transform="rotate(10 143 107)"/>
+    <rect x="185" y="110" width="38" height="13" rx="6.5" transform="rotate(-50 204 116)"/>
+    <rect x="95" y="130" width="42" height="13" rx="6.5" transform="rotate(25 116 136)"/>
+    <rect x="150" y="145" width="40" height="13" rx="6.5" transform="rotate(-8 170 151)"/>
+    <rect x="205" y="75" width="36" height="12" rx="6" transform="rotate(70 223 81)"/>
+  </g>
+</svg>

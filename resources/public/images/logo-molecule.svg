@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Molecule</title>
+  <circle cx="32" cy="32" r="31" fill="#e6f0fa"/>
+  <g stroke="#004a87" stroke-width="3" stroke-linecap="round">
+    <line x1="32" y1="33" x2="32" y2="13"/>
+    <line x1="32" y1="33" x2="15" y2="43"/>
+    <line x1="32" y1="33" x2="49" y2="43"/>
+    <line x1="49" y1="43" x2="51" y2="55"/>
+  </g>
+  <circle cx="32" cy="33" r="8" fill="#004a87"/>
+  <circle cx="32" cy="12" r="6" fill="#cf222e"/>
+  <circle cx="14" cy="44" r="6" fill="#0969da"/>
+  <circle cx="49" cy="43" r="6" fill="#2da44e"/>
+  <circle cx="51" cy="55" r="3.5" fill="#bf8700"/>
+  <circle cx="29.5" cy="30.5" r="2" fill="#fff" opacity="0.6"/>
+</svg>

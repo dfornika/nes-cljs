@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="320" height="200">
+  <title>Bacterial colonies on an agar plate (illustration)</title>
+  <rect width="320" height="200" rx="8" fill="#f6f8fa"/>
+  <circle cx="160" cy="100" r="88" fill="#e9d8a6" stroke="#c9b27c" stroke-width="4"/>
+  <g fill="#fdf6e3" stroke="#d4c08a" stroke-width="1.5">
+    <circle cx="120" cy="70" r="9"/><circle cx="150" cy="58" r="6"/><circle cx="195" cy="75" r="11"/>
+    <circle cx="110" cy="115" r="7"/><circle cx="160" cy="105" r="12"/><circle cx="205" cy="125" r="8"/>
+    <circle cx="135" cy="145" r="10"/><circle cx="180" cy="152" r="6"/><circle cx="225" cy="95" r="5"/>
+    <circle cx="95" cy="90" r="5"/><circle cx="170" cy="78" r="4"/>
+  </g>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Microscope</title>
+  <circle cx="32" cy="32" r="31" fill="#e6f0fa"/>
+  <g fill="#004a87">
+    <!-- base -->
+    <rect x="14" y="50" width="34" height="5" rx="2.5"/>
+    <!-- arm -->
+    <path d="M40 50 v-6 a14 14 0 0 0 -6 -26 l1.5 -3 a17 17 0 0 1 7.5 30 v5 z"/>
+    <!-- stage -->
+    <rect x="20" y="40" width="20" height="3.5" rx="1.5"/>
+    <!-- body tube (tilted) -->
+    <g transform="rotate(-30 30 24)">
+      <rect x="26" y="10" width="8" height="24" rx="2"/>
+      <rect x="25" y="7" width="10" height="4" rx="1.5"/>
+      <rect x="27.5" y="33" width="5" height="5" rx="1"/>
+    </g>
+  </g>
+  <!-- slide on the stage -->
+  <rect x="22" y="38" width="14" height="2" rx="1" fill="#54aeff"/>
+  <!-- light -->
+  <circle cx="30" cy="46.5" r="2" fill="#bf8700"/>
+</svg>
