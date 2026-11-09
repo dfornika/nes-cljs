@@ -16,3 +16,15 @@
 (def buttons
   "The eight buttons on an NES controller, in the order the console reads them."
   [:a :b :select :start :up :down :left :right])
+
+(defprotocol Inspect
+  "Read-only views into the emulated hardware, for the inspector panels.
+  These return the emulator's live memory, not copies: read from them,
+  never write to them."
+  (ppu-memory [emu]
+    "A Uint8Array of the PPU's 16 KB address space, $0000-$3FFF:
+    pattern tables (tile graphics) at $0000-$1FFF, nametables (background
+    layouts) at $2000-$2FFF, palette RAM at $3F00-$3F1F.")
+  (master-palette [emu]
+    "The 64 colors the NES can produce, as a Uint32Array of 0x00BBGGRR
+    numbers. Palette RAM holds indexes into this."))

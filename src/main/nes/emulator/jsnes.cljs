@@ -28,7 +28,11 @@
       (.buttonDown nes player code)))
   (button-up! [_ player button]
     (when-let [code (button-codes button)]
-      (.buttonUp nes player code))))
+      (.buttonUp nes player code)))
+
+  emu/Inspect
+  (ppu-memory [_] (.. nes -ppu -vramMem))
+  (master-palette [_] (.. nes -ppu -palTable -curTable)))
 
 (defn create
   "Make a jsnes-backed emulator.

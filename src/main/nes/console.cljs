@@ -6,7 +6,8 @@
   that running it 60 times a second doesn't re-render the page. Only
   things the page shows (what ROM is loaded, whether it's running) go in
   `db`."
-  (:require [nes.emulator :as emu]
+  (:require [reagent.core :as r]
+            [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.rom :as rom]
             [nes.screen :as screen]
@@ -18,6 +19,19 @@
   "The current emulator, for poking at from the REPL."
   []
   @emulator)
+
+;; Inspector panels (tile viewer, memory watch...) show the emulator's
+;; memory, which changes constantly. Rather than redraw them every frame,
+;; they deref this, and we bump it about 10 times a second while running,
+;; and whenever something happens while paused (step, reset, load).
+(defonce inspect-tick (r/atom 0))
+
+(def ^:private inspect-interval-ms 100)
+
+(defonce ^:private last-inspect (atom 0))
+
+(defn refresh-inspectors! []
+  (swap! inspect-tick inc))
 
 ;; ---------------------------------------------------------------------------
 ;; Timing
@@ -53,6 +67,9 @@
           frames (js/Math.floor (/ behind frame-ms))]
       (try
         (dotimes [_ frames] (emu/frame! @emulator))
+        (when (>= (- ts @last-inspect) inspect-interval-ms)
+          (reset! last-inspect ts)
+          (refresh-inspectors!))
         (swap! clock assoc :last-ts ts :behind-ms (- behind (* frames frame-ms)))
         (schedule!)
         (catch :default e
@@ -64,7 +81,8 @@
 
 (defn pause! []
   (when-let [id (:raf-id @clock)] (js/cancelAnimationFrame id))
-  (when (running?) (swap! db assoc :status :paused)))
+  (when (running?) (swap! db assoc :status :paused))
+  (refresh-inspectors!))
 
 (defn resume! []
   (when (and @emulator (#{:paused} (:status @db)))
@@ -76,11 +94,13 @@
   "Run exactly one frame, then stay paused."
   []
   (when (and @emulator (= :paused (:status @db)))
-    (emu/frame! @emulator)))
+    (emu/frame! @emulator)
+    (refresh-inspectors!)))
 
 (defn reset-console! []
   (when-let [e @emulator]
     (emu/press-reset! e)
+    (refresh-inspectors!)
     (when (= :crashed (:status @db))
       (swap! db assoc :status :paused :error nil)
       (resume!))))

@@ -6,6 +6,7 @@
             [nes.rom :as rom]
             [nes.screen :as screen]
             [nes.state :refer [db]]
+            [nes.tiles-view :refer [tiles-view]]
             [nes.ui :as ui]))
 
 (def sample-roms
@@ -102,15 +103,14 @@
 (defn- rom-info
   "What the cartridge's iNES header says about it."
   []
-  (when-let [{:keys [name size header]} (:rom @db)]
+  (if-let [{:keys [name size header]} (:rom @db)]
     (let [{:keys [prg-banks prg-size chr-banks chr-size chr-ram?
                   mapper mirroring battery?]} header
           row (fn [label value note]
                 [:tr
                  [:th {:style {:text-align "left" :padding-right "12px" :vertical-align "top"}} label]
                  [:td value (when note [:div [:small {:style {:color "#57606a"}} note]])]])]
-      [:div {:style panel-style}
-       [:h3 {:style {:margin-top 0}} "Cartridge"]
+      [:div
        [:div [:code name] " " [:small {:style {:color "#57606a"}} "(" size " bytes)"]]
        [:table {:style {:margin-top "8px" :border-spacing "0 6px"}}
         [:tbody
@@ -126,7 +126,8 @@
           "Hardware on the cartridge for swapping banks of ROM in and out"]
          [row "Mirroring" (cljs.core/name mirroring)
           "How the PPU's background screens are arranged"]
-         (when battery? [row "Battery" "yes" "Has battery-backed save RAM"])]]])))
+         (when battery? [row "Battery" "yes" "Has battery-backed save RAM"])]]])
+    [:p {:style {:color "#57606a" :margin 0}} "No cartridge inserted."]))
 
 (defn- samples []
   [:div {:style panel-style}
@@ -137,20 +138,43 @@
       [:button {:on-click #(console/load-url! url)} name]
       " " [:small credit " · " [:a {:href about :target "_blank"} "about"]]])])
 
+(def ^:private tabs
+  [{:id :cartridge :label "Cartridge" :view rom-info}
+   {:id :tiles :label "Tiles (CHR)" :view tiles-view}])
+
+(defn- inspector
+  "The tabbed panel of views into the console's insides."
+  []
+  (let [current (or (:inspector-tab @db) :cartridge)
+        {:keys [view]} (some #(when (= current (:id %)) %) tabs)]
+    [:div {:style (merge panel-style {:padding 0})}
+     [:div {:style {:display "flex" :border-bottom "1px solid #d0d7de"}}
+      (for [{:keys [id label]} tabs]
+        ^{:key id}
+        [:button {:on-click #(swap! db assoc :inspector-tab id)
+                  :style {:border "none" :background "none" :cursor "pointer"
+                          :padding "10px 16px" :font-size "14px"
+                          :font-weight (when (= id current) "bold")
+                          :border-bottom (if (= id current)
+                                           "2px solid #fd8c73"
+                                           "2px solid transparent")}}
+         label])]
+     [:div {:style {:padding "12px 16px"}}
+      [ui/error-boundary [view]]]]))
+
 (defn app
   ""
   []
-  [:div {:style {:max-width "1100px" :margin "0 auto" :padding "16px"}}
+  [:div {:style {:max-width "1400px" :margin "0 auto" :padding "16px"}}
    [:h1 {:style {:margin "0 0 12px"}} "NES.cljs"]
    [ui/error-boundary
     [:div {:style {:display "flex" :gap "16px" :flex-wrap "wrap" :align-items "flex-start"}}
-     [:div {:style {:display "flex" :flex-direction "column" :gap "8px"}}
+     [:div {:style {:display "flex" :flex-direction "column" :gap "12px" :width "512px"}}
       [screen-area]
       [controls]
       (when-let [err (:error @db)]
-        [c/callout {:kind :error :style {:max-width "480px"}} err])]
-     [:div {:style {:display "flex" :flex-direction "column" :gap "12px"
-                    :flex "1" :min-width "260px"}}
-      [rom-info]
+        [c/callout {:kind :error} err])
       [samples]
-      [key-legend]]]]])
+      [key-legend]]
+     [:div {:style {:flex "1" :min-width "300px"}}
+      [inspector]]]]])
