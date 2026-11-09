@@ -13,7 +13,8 @@
             [nes.emulator.jsnes :as jsnes]
             [nes.rom :as rom]
             [nes.screen :as screen]
-            [nes.state :refer [db]]))
+            [nes.state :refer [db]]
+            [nes.zip :as zip]))
 
 (defonce ^:private emulator (atom nil))
 
@@ -369,19 +370,70 @@
                :error (str "Couldn't load " rom-name ": " (ex-message err)))))
     (swap! db assoc :error (str rom-name " isn't an iNES (.nes) file."))))
 
+(defn- strip-gz [name] (.replace name (js/RegExp. "\\.gz$" "i") ""))
+
+;; The last zip file loaded, if it had more than one ROM in it, so the
+;; others can be loaded from the Cartridge tab: {:name :bytes :roms}
+(defonce ^:private archive (atom nil))
+
+(defn- fail! [message]
+  (swap! db assoc :error message))
+
+(defn load-from-archive!
+  "Load ROM `entry-name` from the zip loaded last."
+  [entry-name]
+  (when-let [{:keys [name bytes roms]} @archive]
+    (when-let [entry (some #(when (= entry-name (:name %)) %) roms)]
+      (-> (zip/extract bytes entry)
+          (.then (fn [rom]
+                   (load-bytes! (last (.split (:name entry) "/")) rom)
+                   (when (:rom @db)
+                     (swap! db update :rom assoc
+                            :archive name
+                            :archive-roms (mapv :name roms)
+                            :archive-entry (:name entry)))))
+          (.catch #(fail! (str "Couldn't unzip " entry-name ": " (ex-message %))))))))
+
+(defn load-any!
+  "Load a ROM from `bytes` (a Uint8Array) called `file-name`: a .nes file,
+  or a .zip or .gz with one inside."
+  [file-name ^js bytes]
+  (cond
+    (zip/zip? bytes)
+    (try
+      (let [roms (zip/roms (zip/entries bytes))]
+        (if (empty? roms)
+          (fail! (str "There's no .nes file in " file-name "."))
+          (do (reset! archive {:name file-name :bytes bytes :roms roms})
+              (load-from-archive! (:name (first roms))))))
+      (catch :default e
+        (fail! (str "Couldn't read " file-name ": " (ex-message e)))))
+
+    (zip/gzip? bytes)
+    (-> (zip/gunzip bytes)
+        (.then #(load-bytes! (strip-gz file-name) %))
+        (.catch #(fail! (str "Couldn't decompress " file-name ": " (ex-message %)))))
+
+    (zip/other-archive bytes)
+    (fail! (str file-name " is a " (zip/other-archive bytes) " archive, which can't be opened here. "
+                "Extract the .nes file from it first (or use a .zip)."))
+
+    :else (load-bytes! file-name bytes)))
+
 (defn load-file!
-  "Load a ROM from a browser File (from a file picker or drag-and-drop)."
+  "Load a ROM from a browser File (from a file picker or drag-and-drop):
+  a .nes file, or a .zip or .gz with one inside."
   [^js file]
   (-> (.arrayBuffer file)
-      (.then #(load-bytes! (.-name file) (js/Uint8Array. %)))))
+      (.then #(load-any! (.-name file) (js/Uint8Array. %)))))
 
 (defn load-url!
-  "Load a ROM from a URL."
+  "Load a ROM from a URL (.nes, .zip or .gz)."
   [url]
   (-> (js/fetch url)
       (.then (fn [^js resp]
                (if (.-ok resp)
                  (.arrayBuffer resp)
                  (throw (js/Error. (str "HTTP " (.-status resp)))))))
-      (.then #(load-bytes! (last (.split url "/")) (js/Uint8Array. %)))
+      (.then #(load-any! (last (.split url "/")) (js/Uint8Array. %)))
       (.catch #(swap! db assoc :error (str "Couldn't fetch " url ": " (ex-message %))))))

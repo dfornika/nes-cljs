@@ -47,7 +47,7 @@
       [:<>
        [:button {:on-click #(some-> ^js @input (.click))} "Open ROM…"]
        [:input {:type "file"
-                :accept ".nes"
+                :accept ".nes,.zip,.gz"
                 :ref #(reset! input %)
                 :style {:display "none"}
                 :on-change (fn [^js e]
@@ -116,7 +116,7 @@
            [:div {:style {:position "absolute" :inset 0
                           :display "flex" :align-items "center" :justify-content "center"
                           :color "#8c959f" :text-align "center" :padding "24px"}}
-            "Open a .nes ROM file, drop one here, or pick a sample ROM from the menu above."])
+            "Open a .nes ROM file (or a .zip with one inside), drop one here, or pick a sample ROM from the menu above."])
          (when (= status :paused)
            [:div {:style {:position "absolute" :top "8px" :right "8px"
                           :background "rgba(0,0,0,0.6)" :color "white"
@@ -191,7 +191,7 @@
 (defn- rom-info
   "What the cartridge's iNES header says about it."
   []
-  (if-let [{:keys [name size header sha1 patched]} (:rom @db)]
+  (if-let [{:keys [name size header sha1 patched archive archive-roms archive-entry]} (:rom @db)]
     (let [{:keys [prg-banks prg-size chr-banks chr-size chr-ram?
                   mapper mirroring battery?]} header
           row (fn [label value note]
@@ -199,7 +199,14 @@
                  [:th {:style {:text-align "left" :padding-right "12px" :vertical-align "top"}} label]
                  [:td value (when note [:div [:small {:style {:color "#57606a"}} note]])]])]
       [:div
-       [:div [:code name] " " [:small {:style {:color "#57606a"}} "(" size " bytes)"]]
+       [:div [:code name] " " [:small {:style {:color "#57606a"}} "(" size " bytes"
+                                       (when archive [:span ", from " [:code archive]]) ")"]]
+       (when (> (count archive-roms) 1)
+         [:div {:style {:margin-top "6px" :font-size "13px"}}
+          "Other ROMs in " [:code archive] ": "
+          [:select {:value archive-entry
+                    :on-change #(console/load-from-archive! (.. % -target -value))}
+           (for [r archive-roms] ^{:key r} [:option {:value r} r])]])
        (when patched
          [:div {:style {:margin-top "6px" :font-size "13px" :background "#fbefff"
                         :border "1px solid #d8b9ff" :border-radius "6px" :padding "4px 10px"}}

@@ -83,6 +83,7 @@ committed to; pick whatever looks fun.
 - [x] **Page fits the window** (no page scroll), **big-screen mode** with a pull-up
   inspector drawer, **full screen**, Sample ROMs and Controls in pop-ups
 - [x] **More sample ROMs** – Thwaite, 240p Test Suite
+- [x] **Zipped ROMs** – .zip (pick between several ROMs in one) and .gz
 - [ ] **Keyboard shortcuts** for big screen / full screen / pause
 - [ ] **Remember the layout** (big screen, drawer height, tab) between visits
 
