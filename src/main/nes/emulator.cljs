@@ -17,7 +17,14 @@
   (set-audio-sink! [emu f]
     "Send sound to `f`, called with each sample as (f left right), both
     -1.0 to 1.0, at `sample-rate` samples per second of emulated time.
-    nil for no sound."))
+    nil for no sound.")
+  (picture-so-far! [emu]
+    "While the PPU is partway through drawing the picture: {:pixels :line},
+    where `:pixels` (a Uint32Array of 256x240 0x00BBGGRR pixels, like a
+    finished frame) is complete for lines above `:line`, the one being
+    drawn now. nil when the PPU isn't drawing (in vertical blank).
+    Makes sure every finished line is in `:pixels`, which doesn't change
+    what the frame ends up looking like."))
 
 (def sample-rate
   "Audio samples per second the emulator produces."
@@ -62,6 +69,12 @@
     "The PPU's current settings from PPUCTRL and PPUMASK, as a map:
     `:nmi?` `:sprite-height` (8 or 16) `:bg-table` `:sprite-table` (0 or 1)
     `:show-bg?` `:show-sprites?`")
+  (ppu-registers [emu]
+    "The PPU's three settings/status registers as bytes:
+    `:ctrl` (PPUCTRL, $2000), `:mask` (PPUMASK, $2001) and `:status`
+    (PPUSTATUS, $2002). PPUCTRL and PPUMASK are write-only, so these are
+    what the CPU last wrote. Reading them here has no side effects (a real
+    read of PPUSTATUS would clear its vblank bit).")
   (mirroring [emu]
     "How the cartridge arranges the nametables right now: :horizontal,
     :vertical, :single-screen or :four-screen. (Some mappers change it.)"))

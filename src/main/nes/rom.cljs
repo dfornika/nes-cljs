@@ -16,7 +16,8 @@
   uses. A mapper is extra hardware on the cartridge that lets a game hold
   more PRG/CHR than the NES can see at once, by swapping banks in and out.
 
-  See https://www.nesdev.org/wiki/INES")
+  See https://www.nesdev.org/wiki/INES"
+  (:require [nes.sha1 :refer [sha1]]))
 
 (def ^:private magic
   "Every iNES file starts with these four bytes: 'N' 'E' 'S' and $1A."
@@ -68,3 +69,10 @@
   "Names of the most common mappers, by iNES mapper number."
   {0 "NROM" 1 "MMC1" 2 "UxROM" 3 "CNROM" 4 "MMC3" 7 "AxROM"
    9 "MMC2" 10 "MMC4" 11 "Color Dreams" 66 "GxROM"})
+
+(defn rom-hash
+  "The SHA-1 of the ROM's contents without its 16-byte header, as hex.
+  This identifies a game however its file is named, and is the hash ROM
+  databases like No-Intro list (as \"SHA-1 without header\")."
+  [^js bytes]
+  (sha1 (.subarray bytes 16)))

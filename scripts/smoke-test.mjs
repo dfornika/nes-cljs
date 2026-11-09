@@ -78,7 +78,7 @@ try {
   check(f1 - f0 > 30, `emulation runs (${f1 - f0} frames in 1 s)`);
 
   // Every tab renders without errors.
-  const tabs = ['Schematic', 'Cartridge', 'CPU', 'Memory', 'Lens', 'Tiles (CHR)',
+  const tabs = ['Schematic', 'Cartridge', 'CPU', 'PPU', 'Memory', 'Lens', 'Tiles (CHR)',
                 'Sprites (OAM)', 'Background', 'Palettes'];
   for (const tab of tabs) {
     const before = errors.length;
@@ -90,6 +90,7 @@ try {
   // Pause, step, run.
   await page.click('button:text-is("Pause")');
   await page.click('button:text-is("Step instruction")');
+  await page.click('button:text-is("Step line")');
   await page.click('button:text-is("Step frame")');
   await page.click('button:text-is("Run")');
   check(true, 'pause / step / run');

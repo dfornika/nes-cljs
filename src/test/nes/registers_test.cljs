@@ -22,3 +22,14 @@
     (is (str/includes? (regs/describe 0x4000 0x40 false) "open bus"))
     (is (str/includes? (regs/describe 0x2000 0x20 false) "open bus"))
     (is (not (str/includes? (or (regs/describe 0x2002 0x00 false) "") "open bus")))))
+
+(deftest decoding-bits
+  (let [ctrl (regs/decode-bits (get-in regs/bit-fields [:ctrl :fields]) 2r10010010)
+        by-name (into {} (map (juxt :name :value) ctrl))]
+    (is (= "on" (by-name "NMI at vblank")))
+    (is (= "8×8" (by-name "Sprite size")))
+    (is (= "$1000" (by-name "Background tiles")))
+    (is (= "$2800" (by-name "Nametable"))))
+  ;; every register's fields cover each bit exactly once
+  (doseq [[_ {:keys [fields]}] regs/bit-fields]
+    (is (= (range 8) (sort (mapcat :bits fields))))))

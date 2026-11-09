@@ -85,22 +85,80 @@
   (into {} (for [[k spec] lens] [k (read-field s spec)])))
 
 ;; ---------------------------------------------------------------------------
-;; Which lens goes with which game
+;; Which lenses go with which game
+;;
+;; A game can have any number of lenses, each looking at a different part
+;; of its state (the board, the player, the sound engine...). Each one is
+;; registered as a map:
+;;
+;;   {:rom    "a1b2c3..."     ; which game: the ROM's SHA-1 (see nes.rom/rom-hash),
+;;                            ; or its file name, or :any for every game
+;;    :name   "Board"         ; unique for that game
+;;    :doc    "What it shows" ; optional
+;;    :fields {...}}          ; the lens itself: field name -> spec
+;;
+;; The SHA-1 is of the ROM without its 16-byte header, the same as ROM
+;; databases like No-Intro list, so it doesn't matter what the file is
+;; called. A file name is handy while exploring, before you've looked up
+;; the hash.
 
-;; Lenses for particular games, by ROM file name. (Matching by a hash of
-;; the ROM would be sturdier; see TODO.md.)
+;; {[rom name] entry}
 (defonce registry (atom {}))
 
+;; Registration order, so lenses are listed in the order they were added
+(defonce ^:private counter (atom 0))
+
 (defn register!
-  "Use `lens` for the ROM called `rom-name`."
-  [rom-name lens]
-  (swap! registry assoc rom-name lens)
-  rom-name)
+  "Add a lens (a map, see above), replacing any lens with the same :rom
+  and :name. Returns its [rom name] key.
+
+  The older two-argument form, (register! rom-name fields), registers
+  `fields` under the name \"Main\"."
+  ([{:keys [rom name fields] :as entry}]
+   (assert (and rom name fields) "A lens needs :rom, :name and :fields")
+   (let [k [rom name]]
+     (swap! registry update k
+            (fn [old] (assoc entry :order (or (:order old) (swap! counter inc)))))
+     k))
+  ([rom fields]
+   (register! {:rom rom :name "Main" :fields fields})))
+
+(defn unregister!
+  "Remove the lens registered as [rom name]."
+  [rom name]
+  (swap! registry dissoc [rom name])
+  nil)
+
+(defn matches?
+  "Does lens `entry` apply to the ROM described by `rom`
+  ({:sha1 ... :name ...}, as in the app db)? How it matched: :sha1,
+  :file-name, :any, or nil."
+  [entry rom]
+  (let [k (:rom entry)]
+    (cond
+      (= k :any) :any
+      (and (:sha1 rom) (= k (:sha1 rom))) :sha1
+      (and (:name rom) (= k (:name rom))) :file-name)))
+
+(defn lenses-for
+  "The lenses that apply to `rom` ({:sha1 ... :name ...}), the game's own
+  first, then ones for every game. Each has :matched-by added."
+  [rom]
+  (->> (vals @registry)
+       (keep #(when-let [how (matches? % rom)] (assoc % :matched-by how)))
+       (sort-by (juxt #(= :any (:matched-by %)) :order))
+       vec))
 
 (defn lens-for
-  "The lens registered for `rom-name`, or nil."
-  [rom-name]
-  (get @registry rom-name))
+  "The first lens (its fields) registered for `rom`, a map
+  {:sha1 ... :name ...} or just a file name. nil if the game has none of
+  its own."
+  [rom]
+  (let [rom (if (string? rom) {:name rom} rom)]
+    (->> (lenses-for rom)
+         (remove #(= :any (:matched-by %)))
+         first
+         :fields)))
 
 (defn default-lens
   "With no game-specific lens, the most interpretable thing we can say
@@ -110,3 +168,43 @@
    :stack (let [sp (get-in s [:cpu :sp])]
             (snapshot/cpu-bytes s (+ 0x101 sp) (- 0xFF sp)))
    :visible-sprites (count (remove #(>= % 0xEF) (take-nth 4 (get-in s [:ppu :oam]))))})
+
+(register! {:rom :any
+            :name "Machine"
+            :doc "What any game's state shows without knowing the game: the CPU, the stack, how many sprites are on screen."
+            :fields [[:cpu [:fn :cpu]]
+                     [:stack [:fn #(:stack (default-lens %))]]
+                     [:visible-sprites [:fn #(:visible-sprites (default-lens %))]]]})
+
+(defn- spec-source
+  "A field spec as code. Functions can't be printed back as code, so :fn
+  fields come out as a placeholder to fill in."
+  [[type :as spec]]
+  (if (= type :fn)
+    "[:fn (fn [s] ...)]"
+    (pr-str spec)))
+
+(defn- hex-addresses
+  "Rewrite the address in field specs like [:u8 63] as [:u8 0x003F]."
+  [src]
+  (.replace src (js/RegExp. "(\\[:[a-z0-9]+ )(\\d+)" "g")
+            (fn [_ before n]
+              (str before "0x" (.padStart (.toUpperCase (.toString (js/parseInt n) 16)) 4 "0")))))
+
+(defn source
+  "Lens `entry` as a `register!` form to paste into a file. If it was
+  registered by file name and the ROM's `sha1` is given, it's written with
+  the hash instead, so it'll work whatever the file is called."
+  ([entry] (source entry nil))
+  ([{:keys [rom name doc fields]} sha1]
+   (let [by-hash? (and sha1 (string? rom) (not= rom sha1))]
+     (str "(lens/register!\n"
+          " {:rom " (pr-str (if by-hash? sha1 rom))
+          (when by-hash? (str " ; " rom))
+          "\n  :name " (pr-str name)
+          (when doc (str "\n  :doc " (pr-str doc)))
+          "\n  :fields\n  ["
+          (apply str (interpose "\n   "
+                                (for [[k spec] fields]
+                                  (str "[" (pr-str k) " " (hex-addresses (spec-source spec)) "]"))))
+          "]})"))))

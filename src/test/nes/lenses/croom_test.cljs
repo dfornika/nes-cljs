@@ -20,4 +20,5 @@
            (croom/cards s)))
     (is (= {:tries-left 19 :pointer {:x 152 :y 171} :cards-left 2}
            (select-keys (lens/interpret croom/lens s) [:tries-left :pointer :cards-left])))
-    (is (= croom/lens (lens/lens-for "croom.nes")))))
+    (is (= ["Pointer & score" "Board" "Machine"]
+           (map :name (lens/lenses-for {:sha1 croom/sha1 :name "renamed.nes"}))))))

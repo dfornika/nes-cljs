@@ -125,6 +125,24 @@
     ;; jsnes looks this up for every sample, so it can change at any time
     (set! (.. nes -opts -onAudioSample) f))
 
+  (picture-so-far! [_]
+    (let [^js ppu (.-ppu nes)
+          ;; jsnes's scanline 21 is the first line of the picture
+          line (- (.-scanline ppu) 21)]
+      (when (<= 0 line 239)
+        ;; jsnes puts the picture together lazily: it composes lines into
+        ;; its buffer when the game changes a PPU setting, and at the end
+        ;; of the frame. Compose the lines that are finished so far, the
+        ;; same way jsnes's own triggerRendering does, but stopping before
+        ;; the line in progress (triggerRendering would include it, half
+        ;; drawn, and not draw it again).
+        (let [done (dec line)
+              last-done (.-lastRenderedScanline ppu)]
+          (when (and (> done last-done) (not (.-_inRendering ppu)))
+            (.renderFramePartially ppu (inc last-done) (- done last-done))
+            (set! (.-lastRenderedScanline ppu) done)))
+        {:pixels (.-buffer ppu) :line line})))
+
   emu/Inspect
   (ppu-memory [_] (.. nes -ppu -vramMem))
   (ppu-peek [_ addr]
@@ -173,6 +191,24 @@
        :sprite-table (.-f_spPatternTable ppu)
        :show-bg? (= 1 (.-f_bgVisibility ppu))
        :show-sprites? (= 1 (.-f_spVisibility ppu))}))
+  (ppu-registers [_]
+    ;; jsnes keeps PPUCTRL and PPUMASK as separate flags; put them back
+    ;; together. (PPUCTRL bit 6 isn't kept, but it does nothing on an NES.)
+    (let [^js ppu (.-ppu nes)]
+      {:ctrl (bit-or (bit-shift-left (.-f_nmiOnVblank ppu) 7)
+                     (bit-shift-left (.-f_spriteSize ppu) 5)
+                     (bit-shift-left (.-f_bgPatternTable ppu) 4)
+                     (bit-shift-left (.-f_spPatternTable ppu) 3)
+                     (bit-shift-left (.-f_addrInc ppu) 2)
+                     (.-f_nTblAddress ppu))
+       :mask (bit-or (bit-shift-left (.-f_color ppu) 5)
+                     (bit-shift-left (.-f_spVisibility ppu) 4)
+                     (bit-shift-left (.-f_bgVisibility ppu) 3)
+                     (bit-shift-left (.-f_spClipping ppu) 2)
+                     (bit-shift-left (.-f_bgClipping ppu) 1)
+                     (.-f_dispType ppu))
+       ;; jsnes keeps the status register's bits in CPU memory at $2002
+       :status (aget (.. nes -cpu -mem) 0x2002)}))
   (mirroring [_]
     ;; jsnes's numbering, from ROM.VERTICAL_MIRRORING etc. in jsnes/src/rom.js
     (case (.. nes -ppu -currentMirroring)

@@ -39,14 +39,33 @@
           :picture (bit-and v 0x3F)
           :face-up? (bit-test v 6)})))
 
-(def lens
-  {:tries-left [:u8 0x003F]
-   :pointer [:struct 0x0055 [:x :u8 :y :u8]]
-   ;; approximate: see the namespace docs
-   :pointer-cell [:struct 0x0053 [:col :u8 :row :u8]]
-   :cards [:fn cards]
-   :cards-left [:fn #(count (cards %))]
-   :face-up [:fn #(filterv :face-up? (cards %))]
-   :frame-counter [:u8 0x0010]})
+(def sha1
+  "Concentration Room v0.02a (croom.nes), without its header. See
+  nes.rom/rom-hash."
+  "235a3396ef05e5a302d586a70a301fd7e651848b")
 
-(lens/register! "croom.nes" lens)
+(def board
+  {:cards [:fn cards]
+   :cards-left [:fn #(count (cards %))]
+   :face-up [:fn #(filterv :face-up? (cards %))]})
+
+(def player
+  [[:tries-left [:u8 0x003F]]
+   [:pointer [:struct 0x0055 [:x :u8 :y :u8]]]
+   ;; approximate: see the namespace docs
+   [:pointer-cell [:struct 0x0053 [:col :u8 :row :u8]]]
+   [:frame-counter [:u8 0x0010]]])
+
+(def lens
+  "Both lenses' fields together."
+  (into player board))
+
+(lens/register! {:rom sha1
+                 :name "Pointer & score"
+                 :doc "Where the pointer is, and how many tries are left."
+                 :fields player})
+
+(lens/register! {:rom sha1
+                 :name "Board"
+                 :doc "The cards on the table: an 8×8 grid at $0300, one byte per cell."
+                 :fields board})

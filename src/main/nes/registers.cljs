@@ -101,3 +101,68 @@
     (when-let [{:keys [decode-read decode-write]} (register-at addr)]
       (let [decode (if write? decode-write decode-read)]
         (when decode (decode value))))))
+
+;; ---------------------------------------------------------------------------
+;; The PPU's settings and status registers, bit by bit
+;;
+;; Each register packs several settings into one byte. These tables say
+;; which bits mean what. `:bits` lists the bit numbers (7 = leftmost)
+;; most significant first, and `:values` names each possible value of
+;; those bits, in order.
+;;
+;; See https://www.nesdev.org/wiki/PPU_registers
+
+(def bit-fields
+  {:ctrl
+   {:name "PPUCTRL" :addr 0x2000 :write-only? true
+    :fields
+    [{:bits [7] :name "NMI at vblank" :values ["off" "on"]
+      :about "Interrupt the CPU when the picture finishes, so the game knows it's safe to update the PPU"}
+     {:bits [6] :name "PPU master/slave" :values ["read EXT" "write EXT"]
+      :about "Unused on the NES (the EXT pins aren't connected)"}
+     {:bits [5] :name "Sprite size" :values ["8×8" "8×16"]
+      :about "8×16 sprites take their two tiles from either pattern table, by tile number"}
+     {:bits [4] :name "Background tiles" :values ["$0000" "$1000"]
+      :about "Which pattern table the background's tiles come from"}
+     {:bits [3] :name "Sprite tiles" :values ["$0000" "$1000"]
+      :about "Which pattern table 8×8 sprites' tiles come from (ignored for 8×16)"}
+     {:bits [2] :name "PPUDATA step" :values ["+1 (across)" "+32 (down)"]
+      :about "How far the PPU address moves after each PPUDATA access: the next tile across, or the one below"}
+     {:bits [1 0] :name "Nametable" :values ["$2000" "$2400" "$2800" "$2C00"]
+      :about "Which nametable the picture starts in: the high bits of the scroll position"}]}
+   :mask
+   {:name "PPUMASK" :addr 0x2001 :write-only? true
+    :fields
+    [{:bits [7] :name "Emphasize blue" :values ["no" "yes"]
+      :about "Darken the other colors, making the picture bluer"}
+     {:bits [6] :name "Emphasize green" :values ["no" "yes"]}
+     {:bits [5] :name "Emphasize red" :values ["no" "yes"]}
+     {:bits [4] :name "Show sprites" :values ["no" "yes"]}
+     {:bits [3] :name "Show background" :values ["no" "yes"]
+      :about "With both off, the PPU stops drawing ('forced blank') and the CPU can write to video memory at any time"}
+     {:bits [2] :name "Sprites at left edge" :values ["hidden" "shown"]
+      :about "Whether sprites are drawn in the leftmost 8 pixels"}
+     {:bits [1] :name "Background at left edge" :values ["hidden" "shown"]
+      :about "Hiding it covers up scrolling glitches at the screen's edge"}
+     {:bits [0] :name "Grayscale" :values ["no" "yes"]}]}
+   :status
+   {:name "PPUSTATUS" :addr 0x2002 :write-only? false
+    :fields
+    [{:bits [7] :name "In vblank" :values ["no" "yes"]
+      :about "Set when the picture finishes; cleared when the game reads PPUSTATUS, and at the start of the next picture"}
+     {:bits [6] :name "Sprite 0 hit" :values ["no" "yes"]
+      :about "Set when sprite 0 overlaps the background: games use it to time mid-picture changes, like a status bar that doesn't scroll"}
+     {:bits [5] :name "Sprite overflow" :values ["no" "yes"]
+      :about "More than 8 sprites on one line (the real PPU's check for this is buggy)"}
+     {:bits [4 3 2 1 0] :name "(stale)" :values nil
+      :about "Not used: reads give whatever was last on the PPU's data bus"}]}})
+
+(defn decode-bits
+  "Decode byte `v` with a register's `fields` (from `bit-fields`): each
+  field with its `:raw` value (from its bits) and `:value` (its name for
+  that, or the number if it has none)."
+  [fields v]
+  (for [{:keys [bits values] :as f} fields
+        :let [raw (reduce (fn [acc b] (bit-or (bit-shift-left acc 1) (if (bit-test v b) 1 0)))
+                          0 bits)]]
+    (assoc f :raw raw :value (if values (nth values raw) raw))))

@@ -161,6 +161,15 @@
     (swap! clock assoc :last-ts nil :behind-ms 0)
     (schedule!)))
 
+(defn- show-picture-so-far!
+  "After stepping: if the PPU is partway through the picture, show it
+  as far as it's drawn, with a marker where it's drawing. Otherwise show
+  the last finished frame."
+  [e]
+  (if-let [{:keys [pixels line]} (emu/picture-so-far! e)]
+    (screen/draw-partial! pixels line (:dot (emu/ppu-state e)))
+    (screen/redraw!)))
+
 (defn while-paused!
   "Run `f` on the emulator if it's paused, then refresh the inspectors.
   Returns true if `f` ran."
@@ -171,6 +180,7 @@
     (when @bus-monitor? (emu/take-bus-activity! @emulator))
     (try
       (f @emulator)
+      (show-picture-so-far! @emulator)
       (catch :default e
         (js/console.error e)
         (swap! db assoc :status :crashed :error (ex-message e))))
@@ -186,6 +196,23 @@
   "Run exactly one CPU instruction, then stay paused."
   []
   (while-paused! emu/step-instruction!))
+
+(defn step-scanline-on!
+  "Run instructions until the PPU moves on to another scanline (at most a
+  frame's worth, in case it never does)."
+  [e]
+  (let [start (:scanline (emu/ppu-state e))]
+    (loop [i 0]
+      (when (and (< i 40000)
+                 (not (emu/step-instruction! e))
+                 (= start (:scanline (emu/ppu-state e))))
+        (recur (inc i))))))
+
+(defn step-scanline!
+  "Run until the PPU starts the next scanline (about 114 CPU cycles), then
+  stay paused."
+  []
+  (while-paused! step-scanline-on!))
 
 (defn reset-console! []
   (when-let [e @emulator]
@@ -219,7 +246,8 @@
         (reset! bus-log [])
         (reset! bus-activity nil)
         (swap! db assoc
-               :rom {:name rom-name :size (.-length bytes) :header header}
+               :rom {:name rom-name :size (.-length bytes) :header header
+                     :sha1 (rom/rom-hash bytes)}
                :status :paused
                :error nil)
         (resume!))

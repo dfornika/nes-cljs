@@ -13,6 +13,7 @@
             [nes.lens-view :refer [lens-view]]
             [nes.logo :refer [logo]]
             [nes.palette-view :refer [palette-view]]
+            [nes.ppu-view :refer [ppu-view]]
             [nes.schematic :refer [schematic-view]]
             [nes.sprites-view :refer [sprites-view]]
             [nes.memory-view :refer [memory-view]]
@@ -65,6 +66,10 @@
                :disabled (not= status :paused)
                :title "Run one CPU instruction, then pause"}
       "Step instruction"]
+     [:button {:on-click console/step-scanline!
+               :disabled (not= status :paused)
+               :title "Run until the PPU starts the next line of the picture, then pause"}
+      "Step line"]
      [:button {:on-click console/step-frame!
                :disabled (not= status :paused)
                :title "Run to the end of this frame (up to 1/60th of a second), then pause"}
@@ -185,7 +190,7 @@
 (defn- rom-info
   "What the cartridge's iNES header says about it."
   []
-  (if-let [{:keys [name size header]} (:rom @db)]
+  (if-let [{:keys [name size header sha1]} (:rom @db)]
     (let [{:keys [prg-banks prg-size chr-banks chr-size chr-ram?
                   mapper mirroring battery?]} header
           row (fn [label value note]
@@ -208,7 +213,9 @@
           "Hardware on the cartridge for swapping banks of ROM in and out"]
          [row "Mirroring" (cljs.core/name mirroring)
           "How the PPU's background screens are arranged"]
-         (when battery? [row "Battery" "yes" "Has battery-backed save RAM"])]]
+         (when battery? [row "Battery" "yes" "Has battery-backed save RAM"])
+         [row "SHA-1" [:code {:style {:font-size "12px" :word-break "break-all"}} sha1]
+          "Identifies this game whatever the file is called (the ROM without its header, as ROM databases list it). Lenses are matched by it."]]]
        [data-box header]])
     [:p {:style {:color "#57606a" :margin 0}} "No cartridge inserted."]))
 
@@ -243,6 +250,7 @@
   [{:id :schematic :label "Schematic" :view schematic-view}
    {:id :cartridge :label "Cartridge" :view rom-info}
    {:id :cpu :label "CPU" :view cpu-view}
+   {:id :ppu :label "PPU" :view ppu-view}
    {:id :memory :label "Memory" :view memory-view}
    {:id :lens :label "Lens" :view lens-view}
    {:id :tiles :label "Tiles (CHR)" :view tiles-view}

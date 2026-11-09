@@ -25,14 +25,22 @@ committed to; pick whatever looks fun.
   hit; highlight sprites drawn behind the background
 - [ ] **Background viewer follow-ups** – show mid-frame scroll changes (status bars) as
   separate bands; mark which nametables are mirror copies
-- [ ] **Register decoder** – PPUCTRL / PPUMASK / PPUSTATUS shown as named bits
-- [ ] **Partial frames while stepping** – show the picture as far as the PPU has drawn
-  it, with a marker at the current scanline and dot
+- [x] **Register decoder** – PPUCTRL / PPUMASK / PPUSTATUS shown as named bits (PPU tab),
+  with a diagram of where the PPU is in the frame
+- [x] **Partial frames while stepping** – show the picture as far as the PPU has drawn
+  it, with a marker at the current scanline and dot; **Step line** button, `(line!)`
+- [ ] **PPU internals** – the v / t / x / w scroll registers, and a log of PPU register
+  writes with the scanline they happened on
 - [ ] **Mapper / bank view** – which PRG and CHR banks are switched in right now
 
 ## REPL-driven development
 
-- [ ] **Match lenses by ROM hash** (e.g. SHA-1 of PRG+CHR) instead of file name
+- [x] **Match lenses by ROM hash** (SHA-1 without the header, as No-Intro lists it)
+- [x] **Several lenses per game**, plus lenses for any game; picker in the Lens tab;
+  `lens!` / `lenses` / `look` / `lens-source` at the REPL, Copy as code in the tab
+- [ ] **Lens fields with notes** (e.g. "approximate") and units, shown in the Lens tab
+- [ ] **Edit a lens value from the Lens tab** (poke through the lens)
+- [ ] **Lenses for the other sample ROMs** (Thwaite, 240p Test Suite)
 - [ ] **Snapshot history** – keep the last few seconds of per-frame snapshots; ask
   "when did $0075 last change?"
 - [ ] **Restore a snapshot** – needs full state (jsnes `toJSON`), not just memory

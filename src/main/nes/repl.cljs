@@ -13,7 +13,7 @@
     (rd 0x0010 8)            ; read 8 bytes   -> [43 0 0 ...]
     (hexdump 0x0000)         ; print 128 bytes as hex
     (poke! 0x0010 0x2A)      ; write RAM
-    (pause!) (step!) (step! 10) (frame!) (frame! 60) (resume!)
+    (pause!) (step!) (step! 10) (line!) (line! 8) (frame!) (frame! 60) (resume!)
     (speed! 0.25)            ; slow motion (or 2, 4 to fast-forward)
     (press! :start)          ; tap a button
     (dis)                    ; disassemble from the program counter
@@ -24,7 +24,10 @@
     (diff a b)               ; which bytes changed?
     (search [a b] (fn [before after] (= after (inc before))))
 
-    (look)                   ; the game's state through its lens
+    (look)                   ; the game's state through its lenses
+    (lenses)                 ; which lenses the loaded game has
+    (lens! \"Player\" {:lives [:u8 0x075A]})  ; try out a lens; it shows in the Lens tab
+    (lens-source \"Player\")   ; print it as code to paste into a file
 
   Reading never has side effects: `rd` on an I/O register like $2002
   returns nil instead of disturbing the hardware."
@@ -111,6 +114,15 @@
    (paused! (fn [e] (dotimes [_ n] (emu/step-instruction! e))))
    (regs)))
 
+(defn line!
+  "Pause, and run until the PPU starts the next scanline, `n` times
+  (default 1). The screen shows the picture drawn so far. Returns where
+  the PPU is."
+  ([] (line! 1))
+  ([n]
+   (paused! (fn [e] (dotimes [_ n] (console/step-scanline-on! e))))
+   (select-keys (emu/ppu-state (emulator)) [:frame :scanline :dot])))
+
 (defn frame!
   "Pause, and run until the end of the frame, `n` times (default 1).
   Returns the frame number."
@@ -171,7 +183,8 @@
   "The whole machine's state right now, as an immutable value.
   See nes.snapshot."
   []
-  (snapshot/capture (emulator) (assoc (:header (:rom @db)) :name (:name (:rom @db)))))
+  (let [{:keys [header name sha1]} (:rom @db)]
+    (snapshot/capture (emulator) (assoc header :name name :sha1 sha1))))
 
 (def diff
   "Bytes that differ between two snapshots. See nes.snapshot/diff."
@@ -189,25 +202,70 @@
                   (hex before 2) " -> " (hex after 2)
                   "  (" (if (pos? delta) "+" "") delta ")"))))
 
+(defn rom
+  "The loaded ROM: its file name, SHA-1 (which lenses are matched by) and
+  header."
+  []
+  (:rom @db))
+
+(defn lenses
+  "The names of the lenses for the loaded ROM: its own, then ones for any
+  game."
+  []
+  (mapv :name (lens/lenses-for (rom))))
+
+(defn- find-lens [lens-name]
+  (or (some #(when (= lens-name (:name %)) %) (lens/lenses-for (rom)))
+      (throw (ex-info (str "No lens called " (pr-str lens-name) " for this ROM. "
+                           "There's: " (pr-str (lenses)))
+                      {:lens lens-name}))))
+
 (defn register-lens!
-  "Use `lens` (see nes.lens) for the ROM called `rom-name`. Handy for
-  trying out a lens from the REPL before putting it in a file."
-  [rom-name lens]
-  (lens/register! rom-name lens))
+  "Add a lens: a map with :rom, :name and :fields (see nes.lens), or the
+  older (register-lens! rom-name fields)."
+  ([entry] (lens/register! entry))
+  ([rom-name fields] (lens/register! rom-name fields)))
+
+(defn lens!
+  "Try out a lens on the loaded game: register `fields` (see nes.lens) as
+  a lens called `lens-name` (default \"REPL\") for this ROM, by its hash,
+  and show it in the Lens tab. Run it again with changes to update it."
+  ([fields] (lens! "REPL" fields))
+  ([lens-name fields] (lens! lens-name nil fields))
+  ([lens-name doc fields]
+   (let [{:keys [sha1 name]} (or (rom) (throw (ex-info "No ROM loaded yet." {})))]
+     (lens/register! (cond-> {:rom (or sha1 name) :name lens-name :fields fields}
+                       doc (assoc :doc doc)))
+     (swap! db assoc :lens-name lens-name :inspector-tab :lens)
+     lens-name)))
 
 (defn current-lens
-  "The lens registered for the loaded ROM, if any."
+  "The fields of the lens shown in the Lens tab (or the loaded ROM's
+  first lens)."
   []
-  (lens/lens-for (get-in @db [:rom :name])))
+  (let [ls (lens/lenses-for (rom))]
+    (:fields (or (some #(when (= (:lens-name @db) (:name %)) %) ls)
+                 (first ls)))))
 
 (defn look
-  "The game's state, read through its lens (or the default lens if none is
-  registered). Pass a snapshot to look at that instead of the present."
+  "The game's state through its lenses: {lens-name values}. With a lens
+  name, just that lens's values. Pass a snapshot as the last argument to
+  look at that moment instead of the present."
   ([] (look (snap)))
-  ([s]
-   (if-let [l (current-lens)]
-     (lens/interpret l s)
-     (lens/default-lens s))))
+  ([lens-name-or-snapshot]
+   (if (string? lens-name-or-snapshot)
+     (look lens-name-or-snapshot (snap))
+     (into {} (for [{:keys [name fields]} (lens/lenses-for (rom))]
+                [name (lens/interpret fields lens-name-or-snapshot)]))))
+  ([lens-name s]
+   (lens/interpret (:fields (find-lens lens-name)) s)))
+
+(defn lens-source
+  "Print lens `lens-name` (default: the one in the Lens tab) as a
+  `register!` form, ready to paste into a file under src/main/nes/lenses."
+  ([] (lens-source (or (:lens-name @db) (first (lenses)))))
+  ([lens-name]
+   (println (lens/source (find-lens lens-name) (:sha1 (rom))))))
 
 (defn tap-snap!
   "Send a snapshot to `tap>` (for Portal or another data browser)."

@@ -13,19 +13,19 @@
 (def ^:private mono {:font-family "ui-monospace, Menlo, Consolas, monospace"})
 
 ;; The previous refresh's values, so changed ones can be highlighted.
-(defonce ^:private previous (atom {:tick nil :values nil :changed #{}}))
+(defonce ^:private previous (atom {:tick nil :lens nil :values nil :changed #{}}))
 
 (defn- track-changes
-  "Remember `values` for this `tick`; return the set of keys that changed
-  since the last tick."
-  [tick values]
-  (let [{prev-tick :tick prev :values changed :changed} @previous]
-    (if (= tick prev-tick)
+  "Remember lens `lens-name`'s `values` for this `tick`; return the set of
+  keys that changed since the last tick. (Switching lenses starts afresh.)"
+  [tick lens-name values]
+  (let [{prev-tick :tick prev-lens :lens prev :values changed :changed} @previous]
+    (if (and (= tick prev-tick) (= lens-name prev-lens))
       changed
-      (let [changed (if prev
+      (let [changed (if (and prev (= lens-name prev-lens))
                       (set (filter #(not= (get prev %) (get values %)) (keys values)))
                       #{})]
-        (reset! previous {:tick tick :values values :changed changed})
+        (reset! previous {:tick tick :lens lens-name :values values :changed changed})
         changed))))
 
 ;; ---------------------------------------------------------------------------
@@ -86,55 +86,98 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private example
-  "{:lives  [:u8 0x075A]
- :score  [:digits 0x07DD 6]
- :player [:struct 0x0086 [:x :u8 :y :u8]]}")
+  "(lens! \"Player\"
+  {:lives  [:u8 0x075A]
+   :score  [:digits 0x07DD 6]
+   :player [:struct 0x0086 [:x :u8 :y :u8]]})")
 
-(defn- no-lens [rom-name]
-  [:div {:style {:font-size "14px"}}
+(defn- no-lens []
+  [:div {:style {:font-size "14px" :background "#f6f8fa" :border "1px solid #d0d7de"
+                 :border-radius "6px" :padding "8px 12px" :margin-bottom "12px"}}
    [:p {:style {:margin-top 0}}
-    "There's no lens for " [:code (or rom-name "this ROM")] " yet. "
+    "This game has no lens of its own yet. "
     "A lens names the bytes where a game keeps its state, so you can see "
     "\"lives: 3\" instead of \"$075A = $03\"."]
-   [:p "To make one, find the addresses from the REPL with " [:code "snap"] ", "
-    [:code "diff"] " and " [:code "search"] " (see " [:code "nes.repl"] "), then:"]
-   [:pre {:style {:background "#f6f8fa" :padding "8px" :font-size "12px"}}
-    "(register-lens! " (pr-str (or rom-name "game.nes")) "\n  " example ")"]
-   [:p {:style muted} "Field types are listed in " [:code "nes.lens"]
-    ". Concentration Room (the sample ROM) has one to look at: "
-    [:code "src/main/nes/lenses/croom.cljs"] "."]])
+   [:p "Find the addresses from the REPL with " [:code "snap"] ", "
+    [:code "diff"] " and " [:code "search"] " (see " [:code "nes.repl"] "), then try a lens out:"]
+   [:pre {:style {:background "white" :padding "8px" :font-size "12px" :margin "0 0 8px"}} example]
+   [:p {:style (merge muted {:margin-bottom 0})}
+    "It appears here straight away; run it again to change it. "
+    [:code "(lens-source)"] " prints it as code to keep in a file. Field types are listed in "
+    [:code "nes.lens"] "; " [:code "src/main/nes/lenses/croom.cljs"] " has examples."]])
+
+(defn- copy-button [text]
+  (let [copied? (r/atom false)]
+    (fn [text]
+      [:button {:title "Copy this lens as ClojureScript, to paste into a file"
+                :on-click (fn []
+                            (-> (js/navigator.clipboard.writeText text)
+                                (.then (fn []
+                                         (reset! copied? true)
+                                         (js/setTimeout #(reset! copied? false) 1500)))))}
+       (if @copied? "Copied ✓" "Copy as code")])))
+
+(defn- picker [lenses current]
+  [:div {:style {:display "flex" :gap "6px" :flex-wrap "wrap" :margin-bottom "8px"}}
+   (for [{:keys [name matched-by]} lenses
+         :let [on? (= name current)]]
+     ^{:key name}
+     [:button {:on-click #(swap! db assoc :lens-name name)
+               :title (case matched-by
+                        :sha1 "For this game (matched by its SHA-1)"
+                        :file-name "For this game (matched by file name)"
+                        :any "For every game")
+               :style {:border-radius "12px" :padding "2px 12px" :cursor "pointer"
+                       :border (if on? "1px solid #0969da" "1px solid #d0d7de")
+                       :background (if on? "#ddf4ff" "white")
+                       :color (if (= matched-by :any) "#57606a" "#24292f")
+                       :font-weight (when on? "bold")}}
+      name])])
+
+(defn- fields-table [fields values changed]
+  [:table {:style {:border-collapse "collapse" :font-size "14px" :width "100%"}}
+   [:tbody
+    (for [[k spec] fields]
+      ^{:key k}
+      [:tr {:style {:border-top "1px solid #eaeef2"
+                    :background (when (changed k) "#fff8c5")}}
+       [:td {:style {:padding "6px 12px 6px 0" :vertical-align "top" :font-weight "bold"
+                     :white-space "nowrap"}}
+        (name k)]
+       [:td {:style {:padding "6px 12px 6px 0" :vertical-align "top" :white-space "nowrap"
+                     :font-size "12px"}}
+        [spec-view spec]]
+       [:td {:style {:padding "6px 0" :vertical-align "top" :width "100%"}}
+        [value-view (get values k)]]])]])
 
 (defn lens-view []
   (let [tick @console/inspect-tick
-        rom-name (get-in @db [:rom :name])
+        rom (:rom @db)
         portal (:portal @dev-tools)]
     (if-let [e (console/emulator-instance)]
-      (if-let [l (lens/lens-for rom-name)]
-        (let [s (snapshot/capture e)
-              values (lens/interpret l s)
-              changed (track-changes tick values)]
-          [:div
-           [:div {:style {:display "flex" :justify-content "space-between" :align-items "baseline"
-                          :gap "12px" :flex-wrap "wrap"}}
-            [:p {:style (merge muted {:margin-top 0 :font-size "14px"})}
-             "The game's state through its lens: names for the bytes it keeps its "
-             "variables in. Values that just changed are highlighted."]
-            (when portal
-              [:button {:on-click #(tap> values) :title "Send these values to tap> (Portal)"}
-               "tap> values"])]
-           [:table {:style {:border-collapse "collapse" :font-size "14px" :width "100%"}}
-            [:tbody
-             (for [[k spec] l]
-               ^{:key k}
-               [:tr {:style {:border-top "1px solid #eaeef2"
-                             :background (when (changed k) "#fff8c5")}}
-                [:td {:style {:padding "6px 12px 6px 0" :vertical-align "top" :font-weight "bold"
-                              :white-space "nowrap"}}
-                 (name k)]
-                [:td {:style {:padding "6px 12px 6px 0" :vertical-align "top" :white-space "nowrap"
-                              :font-size "12px"}}
-                 [spec-view spec]]
-                [:td {:style {:padding "6px 0" :vertical-align "top" :width "100%"}}
-                 [value-view (get values k)]]])]]])
-        [no-lens rom-name])
-      [:p {:style muted} "Load a ROM to see its lens."])))
+      (let [lenses (lens/lenses-for rom)
+            own? (some #(not= :any (:matched-by %)) lenses)
+            {:keys [name doc fields matched-by] :as current}
+            (or (some #(when (= (:lens-name @db) (:name %)) %) lenses)
+                (first lenses))
+            s (snapshot/capture e)
+            values (lens/interpret fields s)
+            changed (track-changes tick name values)]
+        [:div
+         (when-not own? [no-lens])
+         [:div {:style {:display "flex" :justify-content "space-between" :align-items "flex-start"
+                        :gap "12px" :flex-wrap "wrap"}}
+          [picker lenses name]
+          [:div {:style {:display "flex" :gap "6px"}}
+           [copy-button (lens/source current (:sha1 rom))]
+           (when portal
+             [:button {:on-click #(tap> values) :title "Send these values to tap> (Portal)"}
+              "tap> values"])]]
+         [:p {:style (merge muted {:margin "0 0 8px" :font-size "13px"})}
+          (when doc [:span doc " "])
+          (case matched-by
+            :file-name "(Matched by file name: copy it as code to match by the ROM's hash instead.) "
+            nil)
+          "Values that just changed are highlighted."]
+         [fields-table fields values changed]])
+      [:p {:style muted} "Load a ROM to see its lenses."])))
