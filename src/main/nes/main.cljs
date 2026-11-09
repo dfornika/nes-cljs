@@ -3,15 +3,12 @@
   (:require [reagent.core :as r]
             [reagent.dom.client :as rdomc]
             [nes.app :as app]
+            [nes.input :as input]
             [nes.state :refer [db reload-count]]
             [cljs-http.client :as http]
             [cljs.core.async :refer [<!]]))
 
 (defonce root (atom nil))
-
-(defonce root
-  (when (exists? js/document)
-    (rdomc/create-root (.getElementById js/document "app"))))
 
 (defn render
   "Render the app into the root app div."
@@ -29,6 +26,7 @@
 (defn main
   "Main entrypoint."
   []
+  (input/install!)
   (render))
 
 (defn ^:export init
