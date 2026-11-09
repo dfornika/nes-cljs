@@ -300,6 +300,38 @@
       (swap! db assoc :status :paused :error nil)
       (resume!))))
 
+(defn write!
+  "Apply `writes` (a seq of {:space :cpu/:rom :addr :value}, as from
+  nes.lens/writes) to the running game, then refresh the inspectors.
+  :cpu writes go to RAM (other addresses can't be poked and are skipped);
+  :rom writes patch the cartridge. Returns the writes that worked."
+  [writes]
+  (when-let [e @emulator]
+    (let [done (filterv (fn [{:keys [space addr value]}]
+                          (case space
+                            :cpu (emu/cpu-poke! e addr value)
+                            :rom (emu/rom-poke! e addr value)
+                            false))
+                        writes)
+          rom-changes (count (filter #(= :rom (:space %)) done))]
+      (when (pos? rom-changes)
+        (swap! db update-in [:rom :patched] (fnil + 0) rom-changes))
+      (refresh-inspectors! :step)
+      done)))
+
+(defn download-rom!
+  "Save the cartridge, with any changes made to it, as a .nes file."
+  []
+  (when-let [e @emulator]
+    (let [name (-> (get-in @db [:rom :name] "game.nes") (.replace (js/RegExp. "\\.nes$" "i") ""))
+          url (js/URL.createObjectURL (js/Blob. #js [(emu/rom-file e)]
+                                                #js {:type "application/octet-stream"}))
+          a (js/document.createElement "a")]
+      (set! (.-href a) url)
+      (set! (.-download a) (str name " (patched).nes"))
+      (.click a)
+      (js/setTimeout #(js/URL.revokeObjectURL url) 1000))))
+
 (defn button-down! [player button]
   (when-let [e @emulator] (emu/button-down! e player button)))
 

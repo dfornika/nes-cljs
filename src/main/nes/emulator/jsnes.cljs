@@ -150,6 +150,8 @@
   emu/Emulator
   (load-rom! [_ bytes]
     (.loadROM nes bytes)
+    ;; our own copy, so patches don't touch the caller's array
+    (set! (.-romFile state) (js/Uint8Array.from bytes))
     (set! (.-frameStarted state) false)
     (set! (.-frames state) 0)
     (reinstall-monitor! nes state))
@@ -271,6 +273,7 @@
                      (.-f_dispType ppu))
        ;; jsnes keeps the status register's bits in CPU memory at $2002
        :status (aget (.. nes -cpu -mem) 0x2002)}))
+  (rom-file [_] (.-romFile state))
   (mirroring [_]
     ;; jsnes's numbering, from ROM.VERTICAL_MIRRORING etc. in jsnes/src/rom.js
     (case (.. nes -ppu -currentMirroring)
@@ -288,6 +291,30 @@
         (<= 0 addr 0x1FFF) (do (aset mem (bit-and addr 0x07FF) v) true)
         (<= 0x6000 addr 0x7FFF) (do (aset mem addr v) true)
         :else false)))
+  (rom-poke! [_ offset value]
+    (let [^js rom (.-rom nes)
+          prg-start (+ 16 (if (.-trainer rom) 512 0))
+          p (- offset prg-start)]
+      (if (and (<= 0 p) (< p (* 16384 (.-romCount rom))))
+        (let [v (bit-and value 0xFF)
+              ^js bank (aget (.-rom rom) (quot p 16384))
+              in-bank (mod p 16384)
+              chunk (- in-bank (mod in-bank 8192))
+              ^js mem (.. nes -cpu -mem)]
+          ;; jsnes copies a bank into the CPU's memory when the mapper
+          ;; switches it in, so a bank that's switched in now has to be
+          ;; changed there too. Find where by comparing contents, 8 KB at a
+          ;; time (the smallest bank size jsnes's mappers use).
+          (doseq [w [0x8000 0xA000 0xC000 0xE000]
+                  :when (loop [i 0]
+                          (cond (= i 8192) true
+                                (not= (aget mem (+ w i)) (aget bank (+ chunk i))) false
+                                :else (recur (inc i))))]
+            (aset mem (+ w (mod in-bank 8192)) v))
+          (aset bank in-bank v)
+          (aset (.-romFile state) offset v)
+          true)
+        false)))
 
   emu/BusMonitor
   (monitor-bus! [_ on?]
@@ -326,4 +353,5 @@
    #js {:frameStarted false :frames 0 :monitor nil
         :scrollCaptured false :scrollX 0 :scrollY 0
         ;; breakpoints: see emu/Debug
-        :bps [] :bpFlags nil :watch nil :hit nil :skipExec -1 :instrPc 0}))
+        :bps [] :bpFlags nil :watch nil :hit nil :skipExec -1 :instrPc 0
+        :romFile nil}))

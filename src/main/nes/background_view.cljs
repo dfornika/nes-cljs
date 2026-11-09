@@ -7,7 +7,9 @@
             [nes.console :as console]
             [nes.cpu.disasm :refer [hex]]
             [nes.emulator :as emu]
-            [nes.nametable :as nt]))
+            [nes.nametable :as nt]
+            [nes.state :refer [db]]
+            [nes.text-table :as text-table]))
 
 (def ^:private muted {:color "#57606a"})
 (def ^:private mono {:font-family "ui-monospace, Menlo, Consolas, monospace"})
@@ -123,6 +125,54 @@
    [:input {:type "checkbox" :checked (boolean (k @view)) :on-change #(swap! view update k not)}]
    " " label])
 
+(defn- tbl-file-button []
+  (let [input (atom nil)]
+    (fn []
+      [:<>
+       [:button {:on-click #(some-> ^js @input (.click))
+                 :title "A ROM hacker's table file: lines like C1=A, saying which tile is which letter"}
+        "Load a .tbl file…"]
+       [:input {:type "file" :accept ".tbl,.txt" :style {:display "none"}
+                :ref #(reset! input %)
+                :on-change (fn [^js ev]
+                             (when-let [f (aget (.. ev -target -files) 0)]
+                               (-> (.text f)
+                                   (.then (fn [text]
+                                            (let [table (text-table/parse text)]
+                                              (swap! db assoc-in [:text-tables (.-name f)] table)
+                                              (swap! db assoc :text-table (.-name f)))))))
+                             (set! (.. ev -target -value) ""))}]])))
+
+(defn- screen-text
+  "The visible screen read as text, through a text table (see
+  nes.text-table): letters are just tiles, so with a table saying which
+  tile is which letter, the nametables are text."
+  [e scroll]
+  (let [registered (text-table/tables-for (:rom @db))
+        loaded (for [[n t] (:text-tables @db)] {:name n :table t})
+        tables (concat registered loaded)
+        chosen (or (some #(when (= (:text-table @db) (:name %)) %) tables) (first tables))]
+    [:div {:style {:margin-top "14px"}}
+     [:h4 {:style {:margin "0 0 6px"}} "Screen as text"]
+     [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap" :font-size "13px"}}
+      (when (seq tables)
+        [:select {:value (or (:name chosen) "")
+                  :on-change #(swap! db assoc :text-table (.. % -target -value))}
+         (for [{:keys [name]} tables] ^{:key name} [:option {:value name} name])])
+      [tbl-file-button]]
+     (if chosen
+       [:pre {:style (merge mono {:background "#0d1117" :color "#e6edf3" :padding "8px 10px"
+                                  :font-size "12px" :line-height "1.25" :width "fit-content"
+                                  :border-radius "6px" :margin "8px 0 0"})}
+        (->> (text-table/visible-lines (:table chosen) #(emu/ppu-peek e %) (:x scroll) (:y scroll))
+             (interpose "\n")
+             (apply str))]
+       [:p {:style (merge muted {:font-size "13px"})}
+        "Games don't store letters as ASCII: a letter is whichever background tile has its picture. "
+        "A text table (.tbl file) says which tile is which letter; ROM hacking sites like "
+        [:a {:href "https://datacrystal.tcrf.net/" :target "_blank"} "Data Crystal"]
+        " have them for many games. Load one to read the screen as text."])]))
+
 (defn background-view []
   (let [tick @console/inspect-tick]
     (if-let [e (console/emulator-instance)]
@@ -155,5 +205,6 @@
                          :on-click #(swap! view assoc :selected (tile-at %))}]
           [overlay v scroll hover selected]]
          [:div {:style {:margin-top "10px" :min-height "80px"}}
-          [tile-detail e flags palettes tick]]])
+          [tile-detail e flags palettes tick]]
+         [screen-text e scroll]])
       [:p {:style muted} "Load a ROM to see its background."])))

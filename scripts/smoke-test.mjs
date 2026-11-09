@@ -107,6 +107,19 @@ try {
   await page.click('button[title="Remove"]');
   await page.click('button:text-is("Continue")');
 
+  // Editing a lens value: pause, set Concentration Room's tries-left to 42.
+  await page.click('button:text-is("Pause")');
+  await page.click('button:text-is("Lens")');
+  await page.click('button:text-is("Pointer & score")');
+  const tries = page.locator('tr', {has: page.locator('td:text-is("tries-left")')});
+  await tries.locator('span[title^="Click to change"]').click();
+  await tries.locator('input').fill('42');
+  await tries.locator('input').press('Enter');
+  await page.waitForTimeout(200);
+  const triesText = (await tries.locator('td').nth(2).textContent()).trim();
+  check(triesText.startsWith('42'), `lens: editing a value writes it (${triesText})`);
+  await page.click('button:text-is("Run")');
+
   // Big-screen mode: the inspectors move into a drawer at the bottom.
   await page.click('button:text-is("Big screen")');
   await page.click('.drawer-handle');

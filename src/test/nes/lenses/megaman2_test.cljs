@@ -39,5 +39,6 @@
            (select-keys (last objs) [:x :y :hp :facing])))))
 
 (deftest registered-by-hash
-  (is (= ["Mega Man" "Arsenal" "Stage" "Objects" "Input & sound" "Machine"]
+  (is (= ["Mega Man" "Arsenal" "Stage" "Objects" "Input & sound"
+          "Boss weaknesses" "Game rules" "Credits" "Screen text" "Machine"]
          (map :name (lens/lenses-for {:sha1 mm2/sha1 :name "Mega Man II.nes"})))))

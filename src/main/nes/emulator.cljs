@@ -79,6 +79,9 @@
     (PPUSTATUS, $2002). PPUCTRL and PPUMASK are write-only, so these are
     what the CPU last wrote. Reading them here has no side effects (a real
     read of PPUSTATUS would clear its vblank bit).")
+  (rom-file [emu]
+    "The cartridge as an iNES file (a Uint8Array, header included), with
+    any changes made by `rom-poke!`. Read it, never write it.")
   (mirroring [emu]
     "How the cartridge arranges the nametables right now: :horizontal,
     :vertical, :single-screen or :four-screen. (Some mappers change it.)"))
@@ -89,7 +92,13 @@
     "Store `value` at CPU address `addr`, directly in memory, without the
     side effects of a real bus write. Only RAM ($0000-$1FFF, mirrored) and
     cartridge RAM ($6000-$7FFF) can be poked. Returns true if it was
-    written, false if `addr` isn't RAM."))
+    written, false if `addr` isn't RAM.")
+  (rom-poke! [emu offset value]
+    "Change the cartridge's program ROM: the byte at `offset` in the iNES
+    file (counting the 16-byte header, as hex editors do). Takes effect in
+    the running game straight away, and lasts until another ROM is loaded.
+    Returns true, or false if `offset` isn't in the program ROM (CHR ROM
+    can't be changed this way)."))
 
 (defprotocol BusMonitor
   "Watching the traffic on the CPU's bus. Monitoring slows emulation down

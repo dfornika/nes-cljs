@@ -46,7 +46,8 @@
             [nes.lenses.croom]
             [nes.lenses.megaman2]
             [nes.snapshot :as snapshot]
-            [nes.state :refer [db]]))
+            [nes.state :refer [db]]
+            [nes.text-table :as text-table]))
 
 (defn- emulator []
   (or (console/emulator-instance)
@@ -320,6 +321,23 @@
   ([] (lens-source (or (:lens-name @db) (first (lenses)))))
   ([lens-name]
    (println (lens/source (find-lens lens-name) (:sha1 (rom))))))
+
+(defn screen-text
+  "The text on screen now, read through text table `table-name` (one
+  registered for this game, see nes.text-table), as a vector of lines.
+  With no name, the first table registered for the game."
+  ([] (screen-text (:name (first (text-table/tables-for (rom))))))
+  ([table-name]
+   (let [t (or (some #(when (= table-name (:name %)) (:table %)) (text-table/tables-for (rom)))
+               (throw (ex-info (str "No text table called " (pr-str table-name)) {})))
+         {:keys [x y]} (:scroll (emu/ppu-state (emulator)))]
+     (text-table/visible-lines t #(emu/ppu-peek (emulator) %) x y))))
+
+(defn rom-poke!
+  "Change byte `offset` of the cartridge (an offset in the .nes file,
+  counting its 16-byte header) in the running game: a live ROM hack."
+  [offset value]
+  (console/write! [{:space :rom :addr offset :value value}]))
 
 (defn tap-snap!
   "Send a snapshot to `tap>` (for Portal or another data browser)."

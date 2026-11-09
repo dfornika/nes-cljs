@@ -34,12 +34,28 @@
                             listed come out as the number
     [:array addr n type]    n values of a fixed-size type, one after another
     [:struct addr [k type ...]]  fields of fixed-size types, one after another
-    [:fn f]                 anything else: (f snapshot)"
-  (:require [nes.snapshot :as snapshot]))
+    [:text addr n table]    n bytes of text, through a text table (a map
+                            of byte -> string, see nes.text-table)
+    [:screen-text table]    the text on screen right now, through a text
+                            table: a vector of the lines that have any
+    [:fn f]                 anything else: (f snapshot)
 
-(defn- byte-at [s addr] (snapshot/cpu-byte s addr))
+  ROM: wrap a spec in [:rom ...] to read it from the cartridge instead of
+  from RAM, with the address being an offset in the .nes file (counting
+  its 16-byte header, as hex editors and ROM maps like Data Crystal's
+  do):
 
-(def ^:private sizes {:u8 1 :s8 1 :u16 2 :bool 1})
+    [:rom [:u8 0x038315]]            ; Mega Man 2's maximum energy
+    [:rom [:array 0x02E952 14 :u8]]  ; a damage table
+
+  Changing values: `writes` works out which bytes to write to give a field
+  a new value (the Lens tab's editing uses it). A ROM field's new value is
+  written into the cartridge of the running game: a live ROM hack."
+  (:require [clojure.string :as str]
+            [nes.snapshot :as snapshot]
+            [nes.text-table :as text-table]))
+
+(def ^:private sizes {:u8 1 :s8 1 :u16 2 :bool 1 :enum 1})
 
 (defn- size-of [type]
   (or (sizes type)
@@ -47,48 +63,144 @@
                            (keys sizes))
                       {:type type}))))
 
-(declare read-field)
+(defn- elem-type
+  "An :array or :struct element type: a keyword (:u8) or a vector with
+  extra arguments ([:enum {0 \"off\"}])."
+  [t]
+  (if (vector? t) (first t) t))
 
-(defn- read-simple [s type addr]
-  (read-field s [type addr]))
+(defn- elem-spec [t addr]
+  (if (vector? t) (into [(first t) addr] (rest t)) [t addr]))
+
+(defn- struct-offsets
+  "[[k type offset] ...] for a :struct's fields."
+  [fields]
+  (loop [[k t & more] fields, at 0, out []]
+    (if k
+      (recur more (+ at (size-of (elem-type t))) (conj out [k t at]))
+      out)))
+
+(defn- read-with
+  "Decode `spec` from snapshot `s`, getting bytes with (byte addr)."
+  [s byte [type addr & args :as spec]]
+  (let [bytes (fn [a n] (mapv #(byte (+ a %)) (range n)))]
+    (case type
+      :u8 (byte addr)
+      :s8 (when-let [b (byte addr)] (if (>= b 0x80) (- b 0x100) b))
+      :u16 (let [lo (byte addr) hi (byte (inc addr))]
+             (when (and lo hi) (bit-or lo (bit-shift-left hi 8))))
+      :bool (some-> (byte addr) pos?)
+      :bcd (let [[n] args]
+             (reduce (fn [acc b] (+ (* acc 100)
+                                    (* 10 (bit-shift-right b 4))
+                                    (bit-and b 0xF)))
+                     0 (bytes addr n)))
+      :digits (let [[n] args]
+                (reduce (fn [acc d] (+ (* acc 10) d)) 0 (bytes addr n)))
+      :enum (let [[names] args
+                  b (byte addr)]
+              (get names b b))
+      :bits (let [[names] args
+                  b (byte addr)]
+              (into {} (for [[k bit] names] [k (bit-test b bit)])))
+      :array (let [[n elem] args
+                   size (size-of (elem-type elem))]
+               (mapv #(read-with s byte (elem-spec elem (+ addr (* % size)))) (range n)))
+      :struct (let [[fields] args]
+                (into {} (for [[k t at] (struct-offsets fields)]
+                           [k (read-with s byte (elem-spec t (+ addr at)))])))
+      :text (let [[n table] args]
+              (text-table/decode table (bytes addr n)))
+      :screen-text (let [table addr   ; [:screen-text table]
+                         nt (get-in s [:ppu :nametables])]
+                     (vec (remove str/blank?
+                                  (map str/trimr
+                                       (text-table/screen-lines table #(nth nt (- % 0x2000)) 0x2000)))))
+      :rom (read-with s #(snapshot/rom-byte s %) addr)   ; [:rom inner-spec]
+      :fn ((second spec) s)
+      (throw (ex-info (str "Unknown field type " type) {:spec spec})))))
 
 (defn read-field
   "Decode one field spec (see the namespace docs) from snapshot `s`."
-  [s [type addr & args :as spec]]
-  (case type
-    :u8 (byte-at s addr)
-    :s8 (when-let [b (byte-at s addr)] (if (>= b 0x80) (- b 0x100) b))
-    :u16 (let [lo (byte-at s addr) hi (byte-at s (inc addr))]
-           (when (and lo hi) (bit-or lo (bit-shift-left hi 8))))
-    :bool (some-> (byte-at s addr) pos?)
-    :bcd (let [[n] args]
-           (reduce (fn [acc b] (+ (* acc 100)
-                                  (* 10 (bit-shift-right b 4))
-                                  (bit-and b 0xF)))
-                   0 (snapshot/cpu-bytes s addr n)))
-    :digits (let [[n] args]
-              (reduce (fn [acc d] (+ (* acc 10) d)) 0 (snapshot/cpu-bytes s addr n)))
-    :enum (let [[names] args
-                b (byte-at s addr)]
-            (get names b b))
-    :bits (let [[names] args
-                b (byte-at s addr)]
-            (into {} (for [[k bit] names] [k (bit-test b bit)])))
-    :array (let [[n elem] args
-                 size (size-of elem)]
-             (mapv #(read-simple s elem (+ addr (* % size))) (range n)))
-    :struct (let [[fields] args]
-              (loop [[k t & more] fields, at addr, out {}]
-                (if k
-                  (recur more (+ at (size-of t)) (assoc out k (read-simple s t at)))
-                  out)))
-    :fn ((second spec) s)
-    (throw (ex-info (str "Unknown field type " type) {:spec spec}))))
+  [s spec]
+  (read-with s #(snapshot/cpu-byte s %) spec))
 
 (defn interpret
   "Apply `lens` (a map of field name -> field spec) to snapshot `s`."
   [lens s]
   (into {} (for [[k spec] lens] [k (read-field s spec)])))
+
+;; ---------------------------------------------------------------------------
+;; Changing values
+
+(defn- digits-of
+  "`v` as `n` decimal digits, most significant first."
+  [v n]
+  (mapv #(mod (quot v (js/Math.pow 10 %)) 10) (range (dec n) -1 -1)))
+
+(defn- writes-with
+  [s byte space [type addr & args] path value]
+  (let [w (fn [a v] {:space space :addr a :value (bit-and v 0xFF)})
+        number (fn [v] (if (number? v) v (js/parseInt v)))]
+    (case type
+      (:u8 :s8) [(w addr (number value))]
+      :u16 (let [v (number value)] [(w addr v) (w (inc addr) (bit-shift-right v 8))])
+      :bool [(w addr (if value 1 0))]
+      :enum (let [[names] args
+                  by-name (into {} (map (fn [[n nm]] [nm n]) names))]
+              [(w addr (if (contains? by-name value) (by-name value) (number value)))])
+      :bits (let [[names] args
+                  [k] path
+                  bit (names k)
+                  b (byte addr)]
+              (when (and bit b)
+                [(w addr (if value (bit-or b (bit-shift-left 1 bit)) (bit-and b (bit-not (bit-shift-left 1 bit)))))]))
+      :bcd (let [[n] args
+                 ds (digits-of (number value) (* 2 n))]
+             (vec (for [i (range n)]
+                    (w (+ addr i) (+ (* 16 (nth ds (* 2 i))) (nth ds (inc (* 2 i))))))))
+      :digits (let [[n] args]
+                (vec (map-indexed #(w (+ addr %1) %2) (digits-of (number value) n))))
+      :array (let [[n elem] args
+                   [i & more] path]
+               (when (and (int? i) (< -1 i n))
+                 (writes-with s byte space (elem-spec elem (+ addr (* i (size-of (elem-type elem))))) more value)))
+      :struct (let [[fields] args
+                    [k & more] path]
+                (some (fn [[fk t at]] (when (= fk k) (writes-with s byte space (elem-spec t (+ addr at)) more value)))
+                      (struct-offsets fields)))
+      :text (let [[n table] args]
+              (when-let [bs (text-table/encode table value)]
+                ;; pad (with whatever the table uses for a space) or cut to n
+                (let [pad (or (first (text-table/encode table " ")) (last bs) 0)]
+                  (vec (map-indexed #(w (+ addr %1) %2)
+                                    (take n (concat bs (repeat pad))))))))
+      :rom (writes-with s #(snapshot/rom-byte s %) :rom addr path value)
+      nil)))
+
+(defn writes
+  "The bytes to write to give field `spec` the value `value`, as a vector
+  of {:space :cpu/:rom :addr :value}, or nil if that field can't be
+  changed (computed fields, the screen). For part of an :array, :struct
+  or :bits field, `path` says which part: [3], [:x], [:paused]. `s` is a
+  snapshot, for fields that change some bits of a byte and keep the rest."
+  ([s spec value] (writes s spec [] value))
+  ([s spec path value]
+   (writes-with s #(snapshot/cpu-byte s %) :cpu spec path value)))
+
+(defn editable?
+  "Can field `spec` (or its part at `path`) be changed?"
+  ([spec] (editable? spec []))
+  ([[type addr & args] path]
+   (case type
+     (:u8 :s8 :u16 :bool :enum :bcd :digits :text) (empty? path)
+     :bits (= 1 (count path))
+     :array (and (seq path) (editable? (elem-spec (second args) 0) (rest path)))
+     :struct (and (seq path)
+                  (some (fn [[k t]] (when (= k (first path)) (editable? (elem-spec t 0) (rest path))))
+                        (partition 2 (first args))))
+     :rom (editable? addr path)
+     false)))
 
 ;; ---------------------------------------------------------------------------
 ;; Which lenses go with which game

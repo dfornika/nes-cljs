@@ -52,18 +52,23 @@
          {:keys [frame scanline dot]} (emu/ppu-state e)
          ppu-mem (emu/ppu-memory e)
          ^js oam (emu/oam e)]
-     (with-nav
-       {:frame frame
-        :rom rom
-        :cpu (assoc cpu :flags (decode-flags p))
-        :ram (copy 0x800 #(emu/cpu-peek e %))
-        :cart-ram (copy 0x2000 #(emu/cpu-peek e (+ 0x6000 %)))
-        :ppu {:scanline scanline
-              :dot dot
-              :flags (emu/ppu-flags e)
-              :oam (copy 256 #(aget oam %))
-              :palettes (copy 32 #(bit-and 0x3F (aget ppu-mem (+ 0x3F00 %))))
-              :nametables (copy 0x1000 #(emu/ppu-peek e (+ 0x2000 %)))}}))))
+     (vary-meta
+      (with-nav
+        {:frame frame
+         :rom rom
+         :cpu (assoc cpu :flags (decode-flags p))
+         :ram (copy 0x800 #(emu/cpu-peek e %))
+         :cart-ram (copy 0x2000 #(emu/cpu-peek e (+ 0x6000 %)))
+         :ppu {:scanline scanline
+               :dot dot
+               :flags (emu/ppu-flags e)
+               :oam (copy 256 #(aget oam %))
+               :palettes (copy 32 #(bit-and 0x3F (aget ppu-mem (+ 0x3F00 %))))
+               :nametables (copy 0x1000 #(emu/ppu-peek e (+ 0x2000 %)))}})
+      ;; The cartridge file, for lenses that read ROM. In metadata (and
+      ;; not copied: ROM doesn't change by itself) so printing a snapshot
+      ;; doesn't print the whole ROM.
+      assoc ::rom-file (emu/rom-file e)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Reading values out of a snapshot by address
@@ -76,6 +81,20 @@
     (<= 0 addr 0x1FFF) (nth (:ram s) (bit-and addr 0x7FF))
     (<= 0x6000 addr 0x7FFF) (nth (:cart-ram s) (- addr 0x6000))
     :else nil))
+
+(defn rom-byte
+  "The byte at `offset` in the cartridge file (an iNES file offset,
+  counting the 16-byte header) the snapshot was taken from, or nil."
+  [s offset]
+  (when-let [^js f (::rom-file (meta s))]
+    (when (< -1 offset (.-length f))
+      (aget f offset))))
+
+(defn with-rom-file
+  "Snapshot `s` with cartridge file `bytes` (a Uint8Array) attached, for
+  `rom-byte`. (`capture` does this; this is for tests.)"
+  [s bytes]
+  (vary-meta s assoc ::rom-file bytes))
 
 (defn cpu-bytes
   "`n` bytes starting at CPU address `addr`."

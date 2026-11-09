@@ -191,7 +191,7 @@
 (defn- rom-info
   "What the cartridge's iNES header says about it."
   []
-  (if-let [{:keys [name size header sha1]} (:rom @db)]
+  (if-let [{:keys [name size header sha1 patched]} (:rom @db)]
     (let [{:keys [prg-banks prg-size chr-banks chr-size chr-ram?
                   mapper mirroring battery?]} header
           row (fn [label value note]
@@ -200,6 +200,13 @@
                  [:td value (when note [:div [:small {:style {:color "#57606a"}} note]])]])]
       [:div
        [:div [:code name] " " [:small {:style {:color "#57606a"}} "(" size " bytes)"]]
+       (when patched
+         [:div {:style {:margin-top "6px" :font-size "13px" :background "#fbefff"
+                        :border "1px solid #d8b9ff" :border-radius "6px" :padding "4px 10px"}}
+          "You've changed " patched (if (= 1 patched) " byte" " bytes")
+          " of the ROM (from the Lens tab or the REPL), in the running game. The changes last until you load another ROM. "
+          [:a {:href "#" :on-click (fn [e] (.preventDefault e) (console/download-rom!))}
+           "Download the changed ROM"]])
        [:table {:style {:margin-top "8px" :border-spacing "0 6px"}}
         [:tbody
          [row "PRG ROM" (str (kib prg-size) " (" prg-banks " × 16 KB)")

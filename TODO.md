@@ -39,12 +39,17 @@ committed to; pick whatever looks fun.
 - [x] **Several lenses per game**, plus lenses for any game; picker in the Lens tab;
   `lens!` / `lenses` / `look` / `lens-source` at the REPL, Copy as code in the tab
 - [ ] **Lens fields with notes** (e.g. "approximate") and units, shown in the Lens tab
-- [ ] **Edit a lens value from the Lens tab** (poke through the lens)
+- [x] **Edit a lens value from the Lens tab** (RAM, or ROM: a live ROM hack; download the
+  changed ROM from the Cartridge tab)
+- [ ] **Freeze a lens value** (write it every frame, like a Game Genie code)
 - [ ] **Lenses for the other sample ROMs** (Thwaite, 240p Test Suite)
 - [x] **Mega Man 2 lenses** from Data Crystal's RAM map, checked against the game
-- [ ] **ROM lenses** – read data from the cartridge (e.g. Data Crystal's ROM maps: damage
-  tables, speeds) by file offset, not just RAM
-- [ ] **Text tables** (Data Crystal's .tbl files) – decode text in the nametables
+- [x] **ROM lenses** – `[:rom spec]` reads the cartridge by file offset; Mega Man 2's boss
+  weaknesses, game rules and credits
+- [x] **Text tables** – .tbl files; `:text` / `:screen-text` lens fields; Screen as text in the
+  Background tab (load any .tbl)
+- [ ] **Patch files** – save ROM changes as an IPS patch instead of a whole ROM
+- [ ] **CHR ROM editing** (ROM lenses can only change PRG ROM)
 - [ ] **Snapshot history** – keep the last few seconds of per-frame snapshots; ask
   "when did $0075 last change?"
 - [ ] **Restore a snapshot** – needs full state (jsnes `toJSON`), not just memory
