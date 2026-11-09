@@ -152,6 +152,15 @@
        :show-bg? (= 1 (.-f_bgVisibility ppu))
        :show-sprites? (= 1 (.-f_spVisibility ppu))}))
 
+  emu/Poke
+  (cpu-poke! [_ addr value]
+    (let [mem (.. nes -cpu -mem)
+          v (bit-and value 0xFF)]
+      (cond
+        (<= 0 addr 0x1FFF) (do (aset mem (bit-and addr 0x07FF) v) true)
+        (<= 0x6000 addr 0x7FFF) (do (aset mem addr v) true)
+        :else false)))
+
   emu/BusMonitor
   (monitor-bus! [_ on?]
     (cond

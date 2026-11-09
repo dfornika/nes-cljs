@@ -129,8 +129,9 @@
     (swap! clock assoc :last-ts nil :behind-ms 0)
     (schedule!)))
 
-(defn- while-paused!
-  "Run `f` on the emulator if it's paused, then refresh the inspectors."
+(defn while-paused!
+  "Run `f` on the emulator if it's paused, then refresh the inspectors.
+  Returns true if `f` ran."
   [f]
   (when (and @emulator (= :paused (:status @db)))
     ;; Throw away activity from before this step, so the sample taken
@@ -141,7 +142,8 @@
       (catch :default e
         (js/console.error e)
         (swap! db assoc :status :crashed :error (ex-message e))))
-    (refresh-inspectors! :step)))
+    (refresh-inspectors! :step)
+    true))
 
 (defn step-frame!
   "Run until the end of the current frame, then stay paused."

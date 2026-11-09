@@ -3,6 +3,8 @@
  :builds {:app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"
+                ;; the REPL starts in nes.repl, with its tools at hand
+                :devtools {:repl-init-ns nes.repl}
                 :modules {:main
                           {:init-fn nes.main/init}}
                 :build-hooks [(shadow.cljs.build-report/hook {:output-to "build-reports/report.html"})]

@@ -4,6 +4,8 @@
             [reagent.dom.client :as rdomc]
             [nes.app :as app]
             [nes.input :as input]
+            ;; not used here, but loaded so it's ready at the REPL
+            [nes.repl]
             [nes.state :refer [db reload-count]]
             [cljs-http.client :as http]
             [cljs.core.async :refer [<!]]))

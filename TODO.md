@@ -10,6 +10,9 @@ committed to; pick whatever looks fun.
   disassembly, memory watch; pause / step instruction / step frame
 - [x] **Phase 2** – system schematic lit by live bus traffic, bus log of I/O register
   accesses, per-step bus accesses; sprite (OAM) viewer; Power Data Box
+- [x] **REPL tools** – `nes.repl` (rd / poke! / regs / step! / frame! / press! / dis /
+  hexdump), immutable snapshots with diff and search, datafy/nav, declarative lenses,
+  a first lens for Concentration Room
 
 ## Seeing more of the hardware
 
@@ -26,6 +29,17 @@ committed to; pick whatever looks fun.
 - [ ] **Partial frames while stepping** – show the picture as far as the PPU has drawn
   it, with a marker at the current scanline and dot
 - [ ] **Mapper / bank view** – which PRG and CHR banks are switched in right now
+
+## REPL-driven development
+
+- [ ] **Portal** – add Portal to the dev build so `(tap-snap!)` opens a browsable view
+- [ ] **Match lenses by ROM hash** (e.g. SHA-1 of PRG+CHR) instead of file name
+- [ ] **Snapshot history** – keep the last few seconds of per-frame snapshots; ask
+  "when did $0075 last change?"
+- [ ] **Watch list from a lens** – show a game's lens fields live in the UI
+- [ ] **Restore a snapshot** – needs full state (jsnes `toJSON`), not just memory
+- [ ] **Finish the croom lens** – which card the pointer actually selects; whether
+  poking tries-left shows on screen after the next miss
 
 ## Debugging tools
 

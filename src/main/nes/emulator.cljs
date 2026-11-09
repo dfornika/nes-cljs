@@ -53,6 +53,14 @@
     `:nmi?` `:sprite-height` (8 or 16) `:bg-table` `:sprite-table` (0 or 1)
     `:show-bg?` `:show-sprites?`"))
 
+(defprotocol Poke
+  "Changing the emulated machine's memory from outside, for experiments."
+  (cpu-poke! [emu addr value]
+    "Store `value` at CPU address `addr`, directly in memory, without the
+    side effects of a real bus write. Only RAM ($0000-$1FFF, mirrored) and
+    cartridge RAM ($6000-$7FFF) can be poked. Returns true if it was
+    written, false if `addr` isn't RAM."))
+
 (defprotocol BusMonitor
   "Watching the traffic on the CPU's bus. Monitoring slows emulation down
   a little, so it's off unless something asks for it."
