@@ -7,6 +7,7 @@
   things the page shows (what ROM is loaded, whether it's running) go in
   `db`."
   (:require [reagent.core :as r]
+            [nes.audio :as audio]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.rom :as rom]
@@ -98,13 +99,43 @@
 (defn running? []
   (= :running (:status @db)))
 
+;; ---------------------------------------------------------------------------
+;; Speed
+;;
+;; Slow motion and fast-forward: at speed 2 we run twice as many frames per
+;; second of real time. Sound is muted at any speed but 1 (sped-up or
+;; slowed-down sound would need resampling; for now it's just switched off).
+
+(def speeds [0.25 0.5 1 2 4])
+
+(defonce ^:private sound-live? (atom true))
+
+(defn speed [] (or (:speed @db) 1))
+
+(defn set-speed!
+  "Run at `s` times normal speed (see `speeds`)."
+  [s]
+  (swap! db assoc :speed s)
+  (reset! sound-live? (= s 1))
+  (audio/clear!)
+  s)
+
+(defn- on-audio-sample [left right]
+  (when @sound-live? (audio/on-sample! left right)))
+
+;; Something to call before each batch of frames, to read gamepads. Set by
+;; nes.input (which depends on this namespace, so can't be called directly).
+(defonce input-poller (atom nil))
+
 (defn- tick [ts]
   (when (running?)
     (let [{:keys [last-ts behind-ms]} @clock
-          elapsed (if last-ts (- ts last-ts) frame-ms)
-          behind (min (+ behind-ms elapsed) (* max-frames-per-tick frame-ms))
+          s (speed)
+          elapsed (* s (if last-ts (- ts last-ts) frame-ms))
+          behind (min (+ behind-ms elapsed) (* max-frames-per-tick (max 1 s) frame-ms))
           frames (js/Math.floor (/ behind frame-ms))]
       (try
+        (when-let [poll @input-poller] (poll))
         (dotimes [_ frames] (emu/frame! @emulator))
         (when (>= (- ts @last-inspect) inspect-interval-ms)
           (reset! last-inspect ts)
@@ -121,6 +152,7 @@
 (defn pause! []
   (when-let [id (:raf-id @clock)] (js/cancelAnimationFrame id))
   (when (running?) (swap! db assoc :status :paused))
+  (audio/clear!)
   (refresh-inspectors!))
 
 (defn resume! []
@@ -180,6 +212,7 @@
   (if-let [header (rom/parse-header bytes)]
     (try
       (let [e (jsnes/create {:on-frame screen/draw!})]
+        (emu/set-audio-sink! e on-audio-sample)
         (emu/load-rom! e bytes)
         (emu/monitor-bus! e @bus-monitor?)
         (reset! emulator e)

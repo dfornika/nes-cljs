@@ -1,8 +1,8 @@
 # Build the site with shadow-cljs and publish it to GitHub Pages.
 #
 # Runs on every push to main (and can be started by hand from the Actions
-# tab). The `test` step runs the unit tests first, so a failing test stops
-# a broken site from being published.
+# tab). The unit tests run first and the smoke test after the build (see
+# ci.yml), so a broken site isn't published.
 #
 # One-time setup: in the repository's Settings -> Pages, set "Source" to
 # "GitHub Actions".
@@ -65,6 +65,17 @@ jobs:
 
       - name: Build the site
         run: npm run release
+
+      - id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Smoke test the built site
+        run: |
+          npx playwright install --with-deps chromium
+          npm run smoke
 
       - uses: actions/configure-pages@v6
 

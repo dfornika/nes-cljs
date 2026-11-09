@@ -4,6 +4,7 @@
             [reagent.dom.client :as rdomc]
             [nes.app :as app]
             [nes.input :as input]
+            [nes.sound :as sound]
             ;; not used here, but loaded so it's ready at the REPL
             [nes.repl]
             [nes.state :refer [db reload-count]]
@@ -29,6 +30,7 @@
   "Main entrypoint."
   []
   (input/install!)
+  (sound/install!)
   (render))
 
 (defn ^:export init

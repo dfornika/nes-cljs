@@ -7,6 +7,8 @@
             [nes.screen :as screen]
             [nes.background-view :refer [background-view]]
             [nes.cpu-view :refer [cpu-view]]
+            [nes.input :as input]
+            [nes.sound :as sound]
             [nes.lens-view :refer [lens-view]]
             [nes.palette-view :refer [palette-view]]
             [nes.schematic :refer [schematic-view]]
@@ -63,6 +65,25 @@
       "Step frame"]
      [:button {:on-click console/reset-console! :disabled (not loaded?)} "Reset"]]))
 
+(defn- sound-and-speed []
+  (let [on? (sound/on?)
+        speed (console/speed)]
+    [:div {:style {:display "flex" :gap "14px" :align-items "center" :flex-wrap "wrap" :font-size "14px"}}
+     [:span {:style {:display "inline-flex" :gap "6px" :align-items "center"}}
+      [:button {:on-click sound/toggle! :title (if on? "Turn sound off" "Turn sound on")
+                :style {:min-width "90px"}}
+       (if on? "🔊 Sound on" "🔇 Sound off")]
+      [:input {:type "range" :min 0 :max 1 :step 0.05 :value (sound/volume)
+               :disabled (not on?) :title "Volume" :style {:width "90px"}
+               :on-change #(sound/set-volume! (js/parseFloat (.. % -target -value)))}]]
+     [:label {:title "Slow motion or fast-forward. Sound is muted at speeds other than 1×."}
+      "Speed "
+      [:select {:value (str speed)
+                :on-change #(console/set-speed! (js/parseFloat (.. % -target -value)))}
+       (for [s console/speeds] ^{:key s} [:option {:value (str s)} (str s "×")])]]
+     (when (and on? (not= speed 1))
+       [:small {:style {:color "#57606a"}} "(muted while not at 1×)"])]))
+
 (defn- screen-area
   "The screen, which you can also drop a .nes file onto."
   []
@@ -98,13 +119,29 @@
    s])
 
 (defn- key-legend []
-  [:div {:style panel-style}
-   [:h3 {:style {:margin-top 0}} "Controls"]
-   [:table
-    [:tbody
-     (for [[k b] [["← ↑ → ↓" "D-pad"] ["X" "A"] ["Z" "B"]
-                  ["Enter" "Start"] ["Shift" "Select"]]]
-       ^{:key b} [:tr [:td [kb k]] [:td {:style {:padding-left "8px"}} b]])]]])
+  (let [pads (:gamepads @db)]
+    [:div {:style panel-style}
+     [:h3 {:style {:margin-top 0}} "Controls"]
+     [:table {:style {:border-spacing "0 3px"}}
+      [:thead
+       [:tr {:style {:color "#57606a" :font-size "13px" :text-align "left"}}
+        [:th] [:th {:style {:font-weight "normal"}} "Player 1"]
+        [:th {:style {:font-weight "normal" :padding-left "16px"}} "Player 2"]]]
+      [:tbody
+       (for [[button p1 p2] input/key-legend]
+         ^{:key button}
+         [:tr [:td {:style {:padding-right "12px"}} button]
+          [:td [kb p1]]
+          [:td {:style {:padding-left "16px"}} [kb p2]]])]]
+     [:div {:style {:margin-top "10px" :font-size "13px"}}
+      [:strong "Gamepads: "]
+      (if (empty? pads)
+        [:span {:style {:color "#57606a"}}
+         "none found. Connect one and press a button on it (browsers only reveal gamepads after a button press)."]
+        [:span (interpose ", " (for [[i {:keys [id]}] (map-indexed vector pads)]
+                                 ^{:key i} [:span "player " (inc i) ": " [:span {:style {:color "#57606a"}} id]]))])
+      [:div {:style {:color "#57606a" :margin-top "4px"}}
+       "Face buttons: right/top = A, bottom/left = B, like the NES pad. D-pad or left stick to move."]]]))
 
 (defn- hex [n width]
   (str "$" (.padStart (.toUpperCase (.toString n 16)) width "0")))
@@ -224,6 +261,7 @@
      [:div {:style {:display "flex" :flex-direction "column" :gap "12px" :width "512px"}}
       [screen-area]
       [controls]
+      [sound-and-speed]
       (when-let [err (:error @db)]
         [c/callout {:kind :error} err])
       [samples]

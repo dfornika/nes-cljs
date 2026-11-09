@@ -14,6 +14,7 @@
     (hexdump 0x0000)         ; print 128 bytes as hex
     (poke! 0x0010 0x2A)      ; write RAM
     (pause!) (step!) (step! 10) (frame!) (frame! 60) (resume!)
+    (speed! 0.25)            ; slow motion (or 2, 4 to fast-forward)
     (press! :start)          ; tap a button
     (dis)                    ; disassemble from the program counter
 
@@ -90,6 +91,11 @@
 
 (defn pause! [] (console/pause!) (:status @db))
 (defn resume! [] (console/resume!) (:status @db))
+
+(defn speed!
+  "Run at `s` times normal speed: one of 0.25, 0.5, 1, 2, 4."
+  [s]
+  (console/set-speed! s))
 
 (defn- paused!
   "Pause (if running) and run `f` on the emulator."

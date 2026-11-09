@@ -13,7 +13,15 @@
   (step-instruction! [emu]
     "Run exactly one CPU instruction. Returns true if that finished a frame.")
   (button-down! [emu player button] "Press `button` (a keyword like :a or :up) on controller `player` (1 or 2).")
-  (button-up! [emu player button] "Release `button` on controller `player`."))
+  (button-up! [emu player button] "Release `button` on controller `player`.")
+  (set-audio-sink! [emu f]
+    "Send sound to `f`, called with each sample as (f left right), both
+    -1.0 to 1.0, at `sample-rate` samples per second of emulated time.
+    nil for no sound."))
+
+(def sample-rate
+  "Audio samples per second the emulator produces."
+  48000)
 
 (def buttons
   "The eight buttons on an NES controller, in the order the console reads them."

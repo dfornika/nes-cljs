@@ -9,11 +9,13 @@
     "bundle": "clojure -M:dev -m shadow.cljs.devtools.cli release bundle && node scripts/bundle.mjs",
     "clean": "rm -rf resources/public/js",
     "test": "clojure -M:dev:test -m shadow.cljs.devtools.cli compile test && node target/test/test.js",
-    "test:watch": "clojure -M:dev:test -m shadow.cljs.devtools.cli watch test"
+    "test:watch": "clojure -M:dev:test -m shadow.cljs.devtools.cli watch test",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "playwright": "1.64.1",
     "shadow-cljs": "^3.5.4"
   },
   "dependencies": {

@@ -121,6 +121,9 @@
   (button-up! [_ player button]
     (when-let [code (button-codes button)]
       (.buttonUp nes player code)))
+  (set-audio-sink! [_ f]
+    ;; jsnes looks this up for every sample, so it can change at any time
+    (set! (.. nes -opts -onAudioSample) f))
 
   emu/Inspect
   (ppu-memory [_] (.. nes -ppu -vramMem))
@@ -210,7 +213,6 @@
   [{:keys [on-frame]}]
   (->JsnesEmulator
    (NES. #js {:onFrame on-frame
-              ;; No sound yet - it needs an audio pipeline of its own.
-              :emulateSound false})
+              :sampleRate emu/sample-rate})
    #js {:frameStarted false :frames 0 :monitor nil
         :scrollCaptured false :scrollX 0 :scrollY 0}))

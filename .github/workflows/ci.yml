@@ -1,0 +1,75 @@
+# Run the tests on every push and pull request.
+#
+# 1. Unit tests (npm test): the pure ClojureScript namespaces, in Node.
+# 2. A release build of the site (npm run release), which also catches
+#    compiler warnings that only show up with optimizations on.
+# 3. A smoke test (npm run smoke): serves the built site, opens it in
+#    headless Chromium, plays the sample ROM and visits every tab,
+#    failing on any error in the page.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run for the older one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install the Clojure CLI
+        run: |
+          curl -fsSL -O https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh
+          chmod +x linux-install.sh
+          sudo ./linux-install.sh
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: clj-${{ runner.os }}-${{ hashFiles('deps.edn') }}
+          restore-keys: clj-${{ runner.os }}-
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Release build
+        run: npm run release
+
+      # Playwright's browser, cached by Playwright version
+      - id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install Chromium for the smoke test
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke test
+        run: npm run smoke

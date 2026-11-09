@@ -54,9 +54,12 @@ committed to; pick whatever looks fun.
 
 ## Playing games properly
 
-- [ ] **Sound** – route jsnes's audio samples to the Web Audio API (AudioWorklet)
-- [ ] **Gamepad support**, player 2, remappable keys
-- [ ] **Speed control** – slow motion (great for watching the schematic) and fast-forward
+- [x] **Sound** – Web Audio (AudioWorklet), volume, remembered on/off
+- [x] **Gamepad support** and **player 2** (keyboard and second gamepad)
+- [x] **Speed control** – 0.25× to 4× (sound muted away from 1×)
+- [ ] **Remappable keys** and gamepad buttons
+- [ ] **Sound at other speeds** – resample instead of muting
+- [ ] **Turbo key** – hold to fast-forward
 
 ## Our own emulator core (Phase 3)
 
@@ -83,5 +86,5 @@ committed to; pick whatever looks fun.
 
 - [ ] Performance check: how much does the bus monitor cost? Consider a Web Worker
   for emulation if the UI gets heavy
-- [ ] CI: run `npm test` on push
+- [x] CI: unit tests, release build and a browser smoke test on every push and PR
 - [ ] A README with screenshots
