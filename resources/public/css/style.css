@@ -18,3 +18,223 @@ code {
 input, textarea {
     max-width: 100%;
 }
+
+/* ------------------------------------------------------------------------
+   Page layout. The page fills the window and doesn't scroll: the screen
+   takes as much height as it can, and the inspector panel scrolls inside
+   itself. (Narrow screens are different; see the end of this file.) */
+
+html, body, #app {
+    height: 100%;
+}
+
+.app {
+    box-sizing: border-box;
+    height: 100vh;
+    height: 100dvh;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 8px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: none;
+}
+
+.app-header svg {
+    margin-right: 8px;
+}
+
+.rom-name {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #57606a;
+}
+
+.app-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: 16px;
+    position: relative;
+}
+
+/* The screen and its buttons. Its width follows the window's height, so
+   the screen is as big as it can be without pushing the buttons off the
+   bottom (16/15 = the screen's width / height). */
+.console-column {
+    flex: none;
+    width: min(58vw, calc((100dvh - 190px) * 16 / 15));
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+
+.screen-box {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+}
+
+.console-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: none;
+}
+
+.inspector {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.inspector-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px 16px;
+}
+
+/* Pop-up panels (Sample ROMs, Controls). The browser centers them. */
+.popover {
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    padding: 16px 20px;
+    box-shadow: 0 8px 24px rgba(31, 35, 40, 0.25);
+    color: #24292f;
+    max-height: 80vh;
+    overflow: auto;
+}
+.popover::backdrop {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* ------------------------------------------------------------------------
+   Big-screen mode: the TV fills the page, on a dark background, and the
+   inspectors pull up from the bottom in a drawer. */
+
+body:has(.app.theater), .app:fullscreen {
+    background-color: #16191d;
+}
+
+.app.theater {
+    max-width: none;
+    color: #e6edf3;
+}
+
+.app.theater .console-column {
+    width: 100%;
+    /* room for the drawer's bar when it's closed */
+    padding-bottom: 34px;
+}
+
+.app.theater .console-buttons {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 24px;
+}
+
+.drawer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+}
+
+.drawer-handle {
+    flex: none;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1px solid #444c56;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    background: #2d333b;
+    color: #e6edf3;
+    font-size: 13px;
+    cursor: ns-resize;
+    /* so dragging on a touch screen moves the drawer, not the page */
+    touch-action: none;
+    user-select: none;
+}
+.drawer-handle:hover {
+    background: #373e47;
+}
+
+.drawer-grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: #768390;
+}
+
+.drawer-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    color: #24292f;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
+}
+.drawer-body .inspector {
+    border-radius: 0;
+    border-top: none;
+}
+
+/* ------------------------------------------------------------------------
+   Narrow screens (phones): stack everything and let the page scroll. */
+
+@media (max-width: 800px) {
+    .app {
+        height: auto;
+        padding: 8px;
+    }
+    .app-main {
+        flex-direction: column;
+    }
+    .console-column {
+        width: 100%;
+        min-width: 0;
+    }
+    .screen-box {
+        flex: none;
+        aspect-ratio: 16 / 15;
+    }
+    .inspector-body {
+        overflow: visible;
+    }
+    .app.theater {
+        height: 100dvh;
+    }
+    .app.theater .screen-box {
+        flex: 1;
+        aspect-ratio: auto;
+    }
+}
+
+.app-header button {
+    font-size: 14px;
+    padding: 4px 10px;
+}

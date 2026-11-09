@@ -60,6 +60,11 @@ committed to; pick whatever looks fun.
 - [ ] **Remappable keys** and gamepad buttons
 - [ ] **Sound at other speeds** – resample instead of muting
 - [ ] **Turbo key** – hold to fast-forward
+- [x] **Page fits the window** (no page scroll), **big-screen mode** with a pull-up
+  inspector drawer, **full screen**, Sample ROMs and Controls in pop-ups
+- [x] **More sample ROMs** – Thwaite, 240p Test Suite
+- [ ] **Keyboard shortcuts** for big screen / full screen / pause
+- [ ] **Remember the layout** (big screen, drawer height, tab) between visits
 
 ## Our own emulator core (Phase 3)
 

@@ -51,15 +51,18 @@
     (.fillRect ctx 0 0 width height)))
 
 (defn canvas
-  "The screen. `:scale` is how many CSS pixels wide each NES pixel is."
-  [{:keys [scale] :or {scale 2}}]
+  "The screen. With `:scale`, each NES pixel is that many CSS pixels wide.
+  With `:fill? true`, the screen grows to fill the box it's in, keeping
+  its shape (with black bars at the sides or top and bottom if needed)."
+  [{:keys [scale fill?] :or {scale 2}}]
   [:canvas {:ref attach!
             :width width
             :height height
-            :style {:width (* scale width)
-                    :height (* scale height)
-                    :display "block"
-                    :background "black"
-                    ;; Keep pixels sharp-edged instead of blurring them
-                    ;; when the canvas is scaled up
-                    :image-rendering "pixelated"}}])
+            :style (merge {:display "block"
+                           :background "black"
+                           ;; Keep pixels sharp-edged instead of blurring
+                           ;; them when the canvas is scaled up
+                           :image-rendering "pixelated"}
+                          (if fill?
+                            {:width "100%" :height "100%" :object-fit "contain"}
+                            {:width (* scale width) :height (* scale height)}))}])

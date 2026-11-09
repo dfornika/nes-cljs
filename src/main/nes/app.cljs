@@ -7,9 +7,11 @@
             [nes.screen :as screen]
             [nes.background-view :refer [background-view]]
             [nes.cpu-view :refer [cpu-view]]
+            [nes.drawer :refer [drawer]]
             [nes.input :as input]
             [nes.sound :as sound]
             [nes.lens-view :refer [lens-view]]
+            [nes.logo :refer [logo]]
             [nes.palette-view :refer [palette-view]]
             [nes.schematic :refer [schematic-view]]
             [nes.sprites-view :refer [sprites-view]]
@@ -22,36 +24,40 @@
   [{:name "Concentration Room"
     :url "roms/croom/croom.nes"
     :about "roms/croom/README.html"
-    :credit "by Damian Yerrick (GPL v3)"}])
+    :blurb "A card-matching game. Flip two cards; keep them if they match."
+    :credit "by Damian Yerrick · GPL v3"}
+   {:name "Thwaite"
+    :url "roms/thwaite/thwaite.nes"
+    :about "https://github.com/pinobatch/thwaite-nes/tree/v0.04"
+    :blurb "Defend the town from missiles. Explosions flicker, which may bother people sensitive to flashing light."
+    :credit "by Damian Yerrick · GPL v3"}
+   {:name "240p Test Suite"
+    :url "roms/240p/240pee.nes"
+    :about "https://github.com/pinobatch/240p-test-mini/tree/v0.23/nes"
+    :blurb "Test patterns: grids, color bars, scrolling, sprites, sound. Good for poking at with the inspectors."
+    :credit "by Damian Yerrick, after Artemio Urbina · GPL v2+"}])
 
-(def ^:private panel-style
-  {:background "white"
-   :border "1px solid #d0d7de"
-   :border-radius "6px"
-   :padding "12px 16px"})
-
-(defn- file-button []
-  [:label {:style {:display "inline-block"
-                   :padding "4px 10px"
-                   :border "1px solid #8c959f"
-                   :border-radius "4px"
-                   :background "#f6f8fa"
-                   :cursor "pointer"}}
-   "Open ROM…"
-   [:input {:type "file"
-            :accept ".nes"
-            :style {:display "none"}
-            :on-change (fn [^js e]
-                         (when-let [f (aget (.. e -target -files) 0)]
-                           (console/load-file! f))
-                         ;; so choosing the same file again still fires
-                         (set! (.. e -target -value) ""))}]])
+(defn- file-button
+  "A button that opens the file chooser, through a hidden file input."
+  []
+  (let [input (atom nil)]
+    (fn []
+      [:<>
+       [:button {:on-click #(some-> ^js @input (.click))} "Open ROM…"]
+       [:input {:type "file"
+                :accept ".nes"
+                :ref #(reset! input %)
+                :style {:display "none"}
+                :on-change (fn [^js e]
+                             (when-let [f (aget (.. e -target -files) 0)]
+                               (console/load-file! f))
+                             ;; so choosing the same file again still fires
+                             (set! (.. e -target -value) ""))}]])))
 
 (defn- controls []
   (let [{:keys [status]} @db
         loaded? (contains? #{:running :paused :crashed} status)]
     [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
-     [file-button]
      (if (= status :running)
        [:button {:on-click console/pause!} "Pause"]
        [:button {:on-click console/resume! :disabled (not= status :paused)} "Run"])
@@ -90,9 +96,8 @@
   (let [dragging? (r/atom false)]
     (fn []
       (let [{:keys [status]} @db]
-        [:div {:style {:position "relative"
-                       :width "fit-content"
-                       :outline (when @dragging? "3px dashed #54aeff")}
+        [:div {:class "screen-box"
+               :style {:outline (when @dragging? "3px dashed #54aeff")}
                :on-drag-over (fn [^js e] (.preventDefault e) (reset! dragging? true))
                :on-drag-leave #(reset! dragging? false)
                :on-drop (fn [^js e]
@@ -100,12 +105,12 @@
                           (reset! dragging? false)
                           (when-let [f (aget (.. e -dataTransfer -files) 0)]
                             (console/load-file! f)))}
-         [screen/canvas {:scale 2}]
+         [screen/canvas {:fill? true}]
          (when (contains? #{nil :empty} status)
            [:div {:style {:position "absolute" :inset 0
                           :display "flex" :align-items "center" :justify-content "center"
                           :color "#8c959f" :text-align "center" :padding "24px"}}
-            "Open a .nes ROM file, drop one here, or try a sample below."])
+            "Open a .nes ROM file, drop one here, or pick a sample ROM from the menu above."])
          (when (= status :paused)
            [:div {:style {:position "absolute" :top "8px" :right "8px"
                           :background "rgba(0,0,0,0.6)" :color "white"
@@ -120,7 +125,7 @@
 
 (defn- key-legend []
   (let [pads (:gamepads @db)]
-    [:div {:style panel-style}
+    [:div
      [:h3 {:style {:margin-top 0}} "Controls"]
      [:table {:style {:border-spacing "0 3px"}}
       [:thead
@@ -207,14 +212,32 @@
        [data-box header]])
     [:p {:style {:color "#57606a" :margin 0}} "No cartridge inserted."]))
 
+(defn- popover
+  "A panel that pops up over the page when a button with
+  `:popover-target id` is clicked, and goes away on a click outside it
+  or Escape (the browser's Popover API does that part)."
+  [id & children]
+  (into [:div {:id id :popover "auto" :class "popover"}] children))
+
+(defn- hide-popover! [id]
+  (some-> (js/document.getElementById id) (.hidePopover)))
+
 (defn- samples []
-  [:div {:style panel-style}
+  [:div {:style {:max-width "420px"}}
    [:h3 {:style {:margin-top 0}} "Sample ROMs"]
-   (for [{:keys [name url about credit]} sample-roms]
+   [:p {:style {:color "#57606a" :font-size "13px"}}
+    "Homebrew games and programs, free to share."]
+   (for [{:keys [name url about blurb credit]} sample-roms]
      ^{:key url}
-     [:div
-      [:button {:on-click #(console/load-url! url)} name]
-      " " [:small credit " · " [:a {:href about :target "_blank"} "about"]]])])
+     [:div {:style {:margin-bottom "12px"}}
+      [:button {:on-click (fn []
+                            (hide-popover! "samples-menu")
+                            (console/load-url! url))
+                :style {:font-weight "bold"}}
+       name]
+      [:div {:style {:font-size "13px" :margin-top "3px"}} blurb]
+      [:small {:style {:color "#57606a"}}
+       credit " · " [:a {:href about :target "_blank"} "about & source"]]])])
 
 (def ^:private tabs
   [{:id :schematic :label "Schematic" :view schematic-view}
@@ -232,8 +255,8 @@
   []
   (let [current (or (:inspector-tab @db) :schematic)
         {:keys [view]} (some #(when (= current (:id %)) %) tabs)]
-    [:div {:style (merge panel-style {:padding 0})}
-     [:div {:style {:display "flex" :flex-wrap "wrap" :border-bottom "1px solid #d0d7de"}}
+    [:div {:class "inspector"}
+     [:div {:style {:display "flex" :flex-wrap "wrap" :border-bottom "1px solid #d0d7de" :flex "none"}}
       (for [{:keys [id label]} tabs]
         ^{:key id}
         [:button {:on-click #(swap! db assoc :inspector-tab id)
@@ -244,27 +267,67 @@
                                            "2px solid #fd8c73"
                                            "2px solid transparent")}}
          label])]
-     [:div {:style {:padding "12px 16px"}}
+     [:div {:class "inspector-body"}
       [ui/error-boundary [view]]]]))
 
+(defn- fullscreen? [] (some? (.-fullscreenElement js/document)))
+
+(defn- toggle-fullscreen! []
+  (if (fullscreen?)
+    (.exitFullscreen js/document)
+    (when-let [el (js/document.querySelector ".app")]
+      (swap! db assoc :theater? true)
+      (.requestFullscreen el))))
+
+(defonce ^:private fullscreen-listener
+  ;; Keep :fullscreen? in step with the browser (Escape also exits).
+  ;; (true, so defonce sees a value and doesn't add it again on reload)
+  (do (.addEventListener js/document "fullscreenchange"
+                         #(swap! db assoc :fullscreen? (fullscreen?)))
+      true))
+
+(defn- header []
+  (let [{:keys [theater? fullscreen? rom]} @db]
+    [:header {:class "app-header"}
+     [logo {:height (if theater? 40 52)}]
+     [file-button]
+     [:button {:popover-target "samples-menu"} "Sample ROMs ▾"]
+     [popover "samples-menu" [samples]]
+     (when rom
+       [:span {:class "rom-name" :title (:name rom)} [:code (:name rom)]])
+     [:span {:style {:flex 1}}]
+     [:button {:popover-target "controls-help" :title "Keyboard keys and gamepads"}
+      "🎮 Controls"]
+     [popover "controls-help" [key-legend]]
+     [:button {:on-click #(swap! db update :theater? not)
+               :disabled fullscreen?
+               :title "Make the TV as big as the window. The inspectors pull up from the bottom."}
+      (if theater? "Exit big screen" "Big screen")]
+     [:button {:on-click toggle-fullscreen!
+               :title "Fill the whole display (Escape to exit)"}
+      (if fullscreen? "Exit full screen" "Full screen")]
+     ;; development-only tools (see src/dev)
+     (for [[k {:keys [label title action]}] @dev-tools]
+       ^{:key k} [:button {:on-click action :title title} label])]))
+
 (defn app
-  ""
+  "The page: a header, the console (screen and buttons), and the
+  inspectors, either beside the screen or (in big-screen mode) in a drawer
+  that pulls up over it. The page itself never scrolls; the inspector
+  panel scrolls inside itself."
   []
-  [:div {:style {:max-width "1400px" :margin "0 auto" :padding "16px"}}
-   [:div {:style {:display "flex" :align-items "center" :gap "16px" :margin "0 0 12px"}}
-    [:h1 {:style {:margin 0}} "NES.cljs"]
-    ;; development-only tools (see src/dev)
-    (for [[k {:keys [label title action]}] @dev-tools]
-      ^{:key k} [:button {:on-click action :title title} label])]
-   [ui/error-boundary
-    [:div {:style {:display "flex" :gap "16px" :flex-wrap "wrap" :align-items "flex-start"}}
-     [:div {:style {:display "flex" :flex-direction "column" :gap "12px" :width "512px"}}
-      [screen-area]
-      [controls]
-      [sound-and-speed]
-      (when-let [err (:error @db)]
-        [c/callout {:kind :error} err])
-      [samples]
-      [key-legend]]
-     [:div {:style {:flex "1" :min-width "300px"}}
-      [inspector]]]]])
+  (let [{:keys [theater? error]} @db]
+    [:div {:class (str "app" (when theater? " theater"))}
+     [header]
+     [ui/error-boundary
+      [:main {:class "app-main"}
+       [:div {:class "console-column"}
+        [screen-area]
+        [:div {:class "console-buttons"}
+         [controls]
+         [sound-and-speed]]
+        (when error
+          [c/callout {:kind :error} error])]
+       (if theater?
+         [drawer db :drawer-height "Inspectors" [inspector]]
+         [inspector])]]]))
