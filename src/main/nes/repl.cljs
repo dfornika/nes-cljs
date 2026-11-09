@@ -45,6 +45,7 @@
             ;; game-specific lenses register themselves when loaded
             [nes.lenses.croom]
             [nes.lenses.megaman2]
+            [nes.lenses.zelda]
             [nes.snapshot :as snapshot]
             [nes.state :refer [db]]
             [nes.text-table :as text-table]))

@@ -44,6 +44,8 @@ committed to; pick whatever looks fun.
 - [ ] **Freeze a lens value** (write it every frame, like a Game Genie code)
 - [ ] **Lenses for the other sample ROMs** (Thwaite, 240p Test Suite)
 - [x] **Mega Man 2 lenses** from Data Crystal's RAM map, checked against the game
+- [x] **Legend of Zelda lenses** – Link, inventory, screen/enemies, save files; ROM: weapon
+  power, shops, world, cave and ending text (editable)
 - [x] **ROM lenses** – `[:rom spec]` reads the cartridge by file offset; Mega Man 2's boss
   weaknesses, game rules and credits
 - [x] **Text tables** – .tbl files; `:text` / `:screen-text` lens fields; Screen as text in the
