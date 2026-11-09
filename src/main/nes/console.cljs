@@ -15,6 +15,10 @@
 
 (defonce ^:private emulator (atom nil))
 
+;; Whether to watch the CPU's bus (for the schematic). Kept here so a newly
+;; loaded emulator gets the same setting.
+(defonce ^:private bus-monitor? (atom false))
+
 (defn emulator-instance
   "The current emulator, for poking at from the REPL."
   []
@@ -30,8 +34,43 @@
 
 (defonce ^:private last-inspect (atom 0))
 
-(defn refresh-inspectors! []
-  (swap! inspect-tick inc))
+;; When the bus monitor is on: what happened on the bus since the previous
+;; refresh, and a rolling log of I/O register accesses.
+(defonce bus-activity (r/atom nil))
+(defonce bus-log (r/atom []))
+(def ^:private bus-log-size 200)
+(defonce ^:private last-sample-ms (atom nil))
+
+(defn- sample-bus!
+  "Collect the bus activity since the last sample. `kind` is :step if
+  it covers exactly one step taken while paused, otherwise :tick."
+  [kind]
+  (when-let [e @emulator]
+    (when-let [activity (emu/take-bus-activity! e)]
+      (let [now (js/performance.now)
+            elapsed (if-let [t @last-sample-ms] (- now t) 0)
+            frame (:frame (emu/ppu-state e))]
+        (reset! last-sample-ms now)
+        (reset! bus-activity (assoc activity :kind kind :elapsed-ms elapsed))
+        (when (seq (:events activity))
+          (swap! bus-log (fn [log]
+                           (let [log (into log (map #(assoc % :frame frame)) (:events activity))]
+                             (if (> (count log) bus-log-size)
+                               (subvec log (- (count log) bus-log-size))
+                               log)))))))))
+
+(defn monitor-bus!
+  "Turn bus monitoring on or off, now and for ROMs loaded later."
+  [on?]
+  (reset! bus-monitor? on?)
+  (reset! last-sample-ms nil)
+  (when-let [e @emulator] (emu/monitor-bus! e on?)))
+
+(defn refresh-inspectors!
+  ([] (refresh-inspectors! :tick))
+  ([kind]
+   (when @bus-monitor? (sample-bus! kind))
+   (swap! inspect-tick inc)))
 
 ;; ---------------------------------------------------------------------------
 ;; Timing
@@ -94,12 +133,15 @@
   "Run `f` on the emulator if it's paused, then refresh the inspectors."
   [f]
   (when (and @emulator (= :paused (:status @db)))
+    ;; Throw away activity from before this step, so the sample taken
+    ;; afterwards covers exactly this step.
+    (when @bus-monitor? (emu/take-bus-activity! @emulator))
     (try
       (f @emulator)
       (catch :default e
         (js/console.error e)
         (swap! db assoc :status :crashed :error (ex-message e))))
-    (refresh-inspectors!)))
+    (refresh-inspectors! :step)))
 
 (defn step-frame!
   "Run until the end of the current frame, then stay paused."
@@ -137,7 +179,10 @@
     (try
       (let [e (jsnes/create {:on-frame screen/draw!})]
         (emu/load-rom! e bytes)
+        (emu/monitor-bus! e @bus-monitor?)
         (reset! emulator e)
+        (reset! bus-log [])
+        (reset! bus-activity nil)
         (swap! db assoc
                :rom {:name rom-name :size (.-length bytes) :header header}
                :status :paused

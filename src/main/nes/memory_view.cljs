@@ -42,6 +42,12 @@
   (let [space (:space @view)]
     (swap! view assoc-in [:base space] (clamp-base space addr))))
 
+(defn show!
+  "Point the hex view at `addr` in `space` (:cpu or :ppu)."
+  [space addr]
+  (swap! view assoc :space space)
+  (go-to! addr))
+
 (defn- watching? [space addr]
   (some #(and (= space (:space %)) (= addr (:addr %))) (:watches @view)))
 

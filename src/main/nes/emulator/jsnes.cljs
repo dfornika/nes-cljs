@@ -11,7 +11,8 @@
   with a copy of jsnes's frame loop (`NES.frame` in jsnes/src/nes.js)
   split into one-instruction steps."
   (:require ["jsnes" :refer [NES Controller]]
-            [nes.emulator :as emu]))
+            [nes.emulator :as emu]
+            [nes.emulator.jsnes-monitor :as monitor]))
 
 (def ^:private button-codes
   {:a      (.-BUTTON_A Controller)
@@ -40,6 +41,7 @@
     (set! (.-frameEnded ppu) false)
     (set! (.-frameStarted state) false)
     (set! (.-frames state) (inc (.-frames state)))
+    (when-let [m (.-monitor state)] (monitor/frame-done! m ppu))
     true))
 
 (defn- step!
@@ -74,15 +76,24 @@
         (set! (.-crashed nes) true)
         (throw e)))))
 
+(defn- reinstall-monitor!
+  "jsnes builds a new CPU, PPU and mapper on reset and ROM load, so the
+  bus monitor has to be put back on the new ones."
+  [^js nes ^js state]
+  (when-let [m (.-monitor state)]
+    (monitor/install! nes m)))
+
 (defrecord JsnesEmulator [^js nes ^js state]
   emu/Emulator
   (load-rom! [_ bytes]
     (.loadROM nes bytes)
     (set! (.-frameStarted state) false)
-    (set! (.-frames state) 0))
+    (set! (.-frames state) 0)
+    (reinstall-monitor! nes state))
   (press-reset! [_]
     (.reset nes)
-    (set! (.-frameStarted state) false))
+    (set! (.-frameStarted state) false)
+    (reinstall-monitor! nes state))
   (frame! [_]
     (loop [] (when-not (step! nes state) (recur))))
   (step-instruction! [_] (step! nes state))
@@ -130,7 +141,30 @@
       ;; usual 241, its 20 the 'pre-render' line -1, its 21 visible line 0.
       {:scanline (if (= s 20) -1 (mod (+ s 241) 262))
        :dot (.-curX ppu)
-       :frame (.-frames state)})))
+       :frame (.-frames state)}))
+  (oam [_] (.. nes -ppu -spriteMem))
+  (ppu-flags [_]
+    (let [^js ppu (.-ppu nes)]
+      {:nmi? (= 1 (.-f_nmiOnVblank ppu))
+       :sprite-height (if (= 1 (.-f_spriteSize ppu)) 16 8)
+       :bg-table (.-f_bgPatternTable ppu)
+       :sprite-table (.-f_spPatternTable ppu)
+       :show-bg? (= 1 (.-f_bgVisibility ppu))
+       :show-sprites? (= 1 (.-f_spVisibility ppu))}))
+
+  emu/BusMonitor
+  (monitor-bus! [_ on?]
+    (cond
+      (and on? (not (.-monitor state)))
+      (let [m (monitor/create)]
+        (set! (.-monitor state) m)
+        (monitor/install! nes m))
+      (and (not on?) (.-monitor state))
+      (do (monitor/uninstall! nes)
+          (set! (.-monitor state) nil))))
+  (take-bus-activity! [_]
+    (when-let [m (.-monitor state)]
+      (monitor/take! m))))
 
 (defn create
   "Make a jsnes-backed emulator.
@@ -142,4 +176,4 @@
    (NES. #js {:onFrame on-frame
               ;; No sound yet - it needs an audio pipeline of its own.
               :emulateSound false})
-   #js {:frameStarted false :frames 0}))
+   #js {:frameStarted false :frames 0 :monitor nil}))

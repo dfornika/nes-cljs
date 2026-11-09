@@ -37,6 +37,12 @@
       (aset pixels i (bit-or 0xFF000000 (aget frame i))))
     (.putImageData ctx image 0 0)))
 
+(defn frame-pixels
+  "The pixels currently on the screen, as a Uint32Array of 256x240
+  0xAABBGGRR numbers, or nil if the screen isn't showing. Read only."
+  []
+  (:pixels @target))
+
 (defn clear!
   "Fill the screen with black."
   []

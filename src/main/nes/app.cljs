@@ -6,6 +6,8 @@
             [nes.rom :as rom]
             [nes.screen :as screen]
             [nes.cpu-view :refer [cpu-view]]
+            [nes.schematic :refer [schematic-view]]
+            [nes.sprites-view :refer [sprites-view]]
             [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db]]
             [nes.tiles-view :refer [tiles-view]]
@@ -106,6 +108,35 @@
 
 (defn- kib [n] (str (/ n 1024) " KB"))
 
+(defn- bits-label
+  "A size in bytes the way 1991 game magazines wrote memory sizes: in
+  kilobits (K) or megabits (M). 32 KB = 256 K."
+  [bytes]
+  (let [kbit (/ (* bytes 8) 1024)]
+    (if (>= kbit 1024) (str (/ kbit 1024) "M") (str kbit "K"))))
+
+(defn- data-box
+  "The cartridge summarized like Nintendo Power's 'Power Data Box'."
+  [{:keys [prg-size chr-size chr-ram? mapper battery?]}]
+  (let [cell {:padding "4px 10px" :text-align "center"}
+        pink "#f8c8d8"]
+    [:div {:style {:display "flex" :gap "14px" :align-items "flex-start" :margin-top "14px"}}
+     [:div {:style {:border "2px solid #24292f" :min-width "170px"
+                    :font-family "system-ui, sans-serif" :background pink}}
+      [:div {:style {:background "#24292f" :color "white" :font-size "10px"
+                     :letter-spacing "1px" :padding "2px 6px"}}
+       "GAME PAK DATA BOX"]
+      [:div {:style (merge cell {:font-size "22px" :border-bottom "2px solid #24292f"})}
+       (bits-label prg-size) " × " (if chr-ram? "RAM" (bits-label chr-size))]
+      [:div {:style {:display "flex" :font-size "18px"}}
+       [:div {:style (merge cell {:flex 1 :border-right "2px solid #24292f"})}
+        (or (rom/mapper-names mapper) (str "#" mapper))]
+       [:div {:style (merge cell {:flex 1})} (if battery? "64K" "—")]]]
+     [:small {:style {:color "#57606a" :max-width "300px"}}
+      "In the style of the \"Power Data Box\" from Nintendo Power #20 (Jan 1991): "
+      "program memory × character memory, then the mapper and the cartridge's "
+      "work RAM. Sizes are in kilobits (K) or megabits (M), as chip makers counted them."]]))
+
 (defn- rom-info
   "What the cartridge's iNES header says about it."
   []
@@ -132,7 +163,8 @@
           "Hardware on the cartridge for swapping banks of ROM in and out"]
          [row "Mirroring" (cljs.core/name mirroring)
           "How the PPU's background screens are arranged"]
-         (when battery? [row "Battery" "yes" "Has battery-backed save RAM"])]]])
+         (when battery? [row "Battery" "yes" "Has battery-backed save RAM"])]]
+       [data-box header]])
     [:p {:style {:color "#57606a" :margin 0}} "No cartridge inserted."]))
 
 (defn- samples []
@@ -145,15 +177,17 @@
       " " [:small credit " · " [:a {:href about :target "_blank"} "about"]]])])
 
 (def ^:private tabs
-  [{:id :cartridge :label "Cartridge" :view rom-info}
+  [{:id :schematic :label "Schematic" :view schematic-view}
+   {:id :cartridge :label "Cartridge" :view rom-info}
    {:id :cpu :label "CPU" :view cpu-view}
    {:id :memory :label "Memory" :view memory-view}
-   {:id :tiles :label "Tiles (CHR)" :view tiles-view}])
+   {:id :tiles :label "Tiles (CHR)" :view tiles-view}
+   {:id :sprites :label "Sprites (OAM)" :view sprites-view}])
 
 (defn- inspector
   "The tabbed panel of views into the console's insides."
   []
-  (let [current (or (:inspector-tab @db) :cartridge)
+  (let [current (or (:inspector-tab @db) :schematic)
         {:keys [view]} (some #(when (= current (:id %)) %) tabs)]
     [:div {:style (merge panel-style {:padding 0})}
      [:div {:style {:display "flex" :border-bottom "1px solid #d0d7de"}}
