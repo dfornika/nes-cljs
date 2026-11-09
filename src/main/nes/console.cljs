@@ -90,12 +90,26 @@
     (swap! clock assoc :last-ts nil :behind-ms 0)
     (schedule!)))
 
-(defn step-frame!
-  "Run exactly one frame, then stay paused."
-  []
+(defn- while-paused!
+  "Run `f` on the emulator if it's paused, then refresh the inspectors."
+  [f]
   (when (and @emulator (= :paused (:status @db)))
-    (emu/frame! @emulator)
+    (try
+      (f @emulator)
+      (catch :default e
+        (js/console.error e)
+        (swap! db assoc :status :crashed :error (ex-message e))))
     (refresh-inspectors!)))
+
+(defn step-frame!
+  "Run until the end of the current frame, then stay paused."
+  []
+  (while-paused! emu/frame!))
+
+(defn step-instruction!
+  "Run exactly one CPU instruction, then stay paused."
+  []
+  (while-paused! emu/step-instruction!))
 
 (defn reset-console! []
   (when-let [e @emulator]

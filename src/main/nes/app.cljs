@@ -5,6 +5,8 @@
             [nes.console :as console]
             [nes.rom :as rom]
             [nes.screen :as screen]
+            [nes.cpu-view :refer [cpu-view]]
+            [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db]]
             [nes.tiles-view :refer [tiles-view]]
             [nes.ui :as ui]))
@@ -46,9 +48,13 @@
      (if (= status :running)
        [:button {:on-click console/pause!} "Pause"]
        [:button {:on-click console/resume! :disabled (not= status :paused)} "Run"])
+     [:button {:on-click console/step-instruction!
+               :disabled (not= status :paused)
+               :title "Run one CPU instruction, then pause"}
+      "Step instruction"]
      [:button {:on-click console/step-frame!
                :disabled (not= status :paused)
-               :title "Run one frame (1/60th of a second), then pause"}
+               :title "Run to the end of this frame (up to 1/60th of a second), then pause"}
       "Step frame"]
      [:button {:on-click console/reset-console! :disabled (not loaded?)} "Reset"]]))
 
@@ -140,6 +146,8 @@
 
 (def ^:private tabs
   [{:id :cartridge :label "Cartridge" :view rom-info}
+   {:id :cpu :label "CPU" :view cpu-view}
+   {:id :memory :label "Memory" :view memory-view}
    {:id :tiles :label "Tiles (CHR)" :view tiles-view}])
 
 (defn- inspector

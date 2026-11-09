@@ -1,15 +1,17 @@
 (ns nes.emulator
   "The boundary between the UI and whatever is actually emulating the NES.
 
-  The rest of the app talks to an emulator only through the `Emulator`
-  protocol. Today the only implementation wraps jsnes (a mature JavaScript
+  The rest of the app talks to an emulator only through these protocols.
+  Today the only implementation wraps jsnes (a mature JavaScript
   emulator); later we can add our own ClojureScript CPU behind the same
-  protocol and run the two side by side.")
+  protocols and run the two side by side.")
 
 (defprotocol Emulator
   (load-rom! [emu bytes] "Insert a cartridge: `bytes` is a Uint8Array of an iNES file.")
   (press-reset! [emu] "Press the console's reset button.")
   (frame! [emu] "Run the emulator until the PPU has drawn one full frame.")
+  (step-instruction! [emu]
+    "Run exactly one CPU instruction. Returns true if that finished a frame.")
   (button-down! [emu player button] "Press `button` (a keyword like :a or :up) on controller `player` (1 or 2).")
   (button-up! [emu player button] "Release `button` on controller `player`."))
 
@@ -19,12 +21,27 @@
 
 (defprotocol Inspect
   "Read-only views into the emulated hardware, for the inspector panels.
-  These return the emulator's live memory, not copies: read from them,
-  never write to them."
+  None of these should change the emulator's state."
   (ppu-memory [emu]
-    "A Uint8Array of the PPU's 16 KB address space, $0000-$3FFF:
-    pattern tables (tile graphics) at $0000-$1FFF, nametables (background
-    layouts) at $2000-$2FFF, palette RAM at $3F00-$3F1F.")
+    "The PPU's live memory as a Uint8Array, indexed by PPU address. Pattern
+    tables (tile graphics) are at $0000-$1FFF, palette RAM at $3F00-$3F1F.
+    Read it, never write it. Use `ppu-peek` for nametables ($2000-$3EFF),
+    whose addresses are mirrored.")
+  (ppu-peek [emu addr]
+    "The byte the PPU would see at PPU address `addr` ($0000-$3FFF).")
   (master-palette [emu]
     "The 64 colors the NES can produce, as a Uint32Array of 0x00BBGGRR
-    numbers. Palette RAM holds indexes into this."))
+    numbers. Palette RAM holds indexes into this.")
+  (cpu-peek [emu addr]
+    "The byte at CPU address `addr`, or nil if reading it could change
+    something. (Reading some I/O registers, like the PPU's at $2000-$2007,
+    has side effects on real hardware, so we don't.)")
+  (cpu-state [emu]
+    "The CPU's registers, as a map:
+    `:a :x :y` (8-bit), `:sp` (stack pointer, 8-bit), `:pc` (program
+    counter, 16-bit, the address of the next instruction), `:p` (status
+    flags, 8-bit) and `:cycles` (CPU cycles since power on).")
+  (ppu-state [emu]
+    "Where the PPU is in drawing the picture: `:scanline` (-1 to 260;
+    0-239 are visible) and `:dot` (0-340, the position along the line),
+    plus `:frame` (frames since the cartridge was loaded)."))
