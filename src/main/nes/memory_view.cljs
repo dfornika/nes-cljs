@@ -187,10 +187,10 @@
      (if addr
        (let [{:keys [name about io?]} (region-at space addr)]
          [:div
-          [:span mono (hex addr 4)] " · " [:strong name] " · "
+          [:span {:style mono} (hex addr 4)] " · " [:strong name] " · "
           (if (peek addr)
-            [:span mono (str/join " = " (map #(format-value peek addr %) [:hex :dec :bin]))]
-            [:span muted (if io?
+            [:span {:style mono} (str/join " = " (map #(format-value peek addr %) [:hex :dec :bin]))]
+            [:span {:style muted} (if io?
                            "I/O register: not shown, because reading it can change the hardware's state"
                            "Not readable")])
           [:div {:style muted} about]])

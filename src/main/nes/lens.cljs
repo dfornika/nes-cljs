@@ -15,6 +15,10 @@
   `interpret` applies a lens to a snapshot (see nes.snapshot) and returns
   a map with the same keys and the decoded values.
 
+  A lens can also be a vector of [name spec] pairs. Maps with more than 8
+  keys don't keep their order, so use pairs to control the order fields
+  are shown in (e.g. in the Lens tab).
+
   Field types:
     [:u8 addr]              unsigned byte, 0-255
     [:s8 addr]              signed byte, -128 to 127

@@ -40,9 +40,26 @@
   (when (.-frameEnded ppu)
     (set! (.-frameEnded ppu) false)
     (set! (.-frameStarted state) false)
+    (set! (.-scrollCaptured state) false)
     (set! (.-frames state) (inc (.-frames state)))
     (when-let [m (.-monitor state)] (monitor/frame-done! m ppu))
     true))
+
+(defn- capture-scroll!
+  "Once per frame, when the PPU starts drawing the first visible line,
+  record the scroll position it's drawing with. (Games often change the
+  scroll partway down the screen, e.g. for a status bar; this is the
+  position for the top of the picture.)
+
+  jsnes keeps the scroll in the PPU's internal 't' register, split into
+  pieces: which nametable (regH, regV), which tile (regHT, regVT), and
+  which pixel within the tile (regFH, regFV)."
+  [^js ppu ^js state]
+  ;; jsnes's scanline 21 is the first visible line
+  (when (and (not (.-scrollCaptured state)) (>= (.-scanline ppu) 21))
+    (set! (.-scrollCaptured state) true)
+    (set! (.-scrollX state) (+ (* 256 (.-regH ppu)) (* 8 (.-regHT ppu)) (.-regFH ppu)))
+    (set! (.-scrollY state) (+ (* 240 (.-regV ppu)) (* 8 (.-regVT ppu)) (.-regFV ppu)))))
 
 (defn- step!
   "Run one CPU instruction (first finishing any DMA transfer that has the
@@ -71,6 +88,7 @@
           (let [cycles (.emulate cpu)]
             (.clockFrameCounter papu cycles (.-apuCatchupCycles cpu))
             (set! (.-apuCatchupCycles cpu) 0)
+            (capture-scroll! ppu state)
             (boolean (frame-ended? ppu state)))))
       (catch :default e
         (set! (.-crashed nes) true)
@@ -141,7 +159,8 @@
       ;; usual 241, its 20 the 'pre-render' line -1, its 21 visible line 0.
       {:scanline (if (= s 20) -1 (mod (+ s 241) 262))
        :dot (.-curX ppu)
-       :frame (.-frames state)}))
+       :frame (.-frames state)
+       :scroll {:x (.-scrollX state) :y (.-scrollY state)}}))
   (oam [_] (.. nes -ppu -spriteMem))
   (ppu-flags [_]
     (let [^js ppu (.-ppu nes)]
@@ -151,6 +170,14 @@
        :sprite-table (.-f_spPatternTable ppu)
        :show-bg? (= 1 (.-f_bgVisibility ppu))
        :show-sprites? (= 1 (.-f_spVisibility ppu))}))
+  (mirroring [_]
+    ;; jsnes's numbering, from ROM.VERTICAL_MIRRORING etc. in jsnes/src/rom.js
+    (case (.. nes -ppu -currentMirroring)
+      0 :vertical
+      1 :horizontal
+      2 :four-screen
+      (3 4 5 6) :single-screen
+      :unknown))
 
   emu/Poke
   (cpu-poke! [_ addr value]
@@ -185,4 +212,5 @@
    (NES. #js {:onFrame on-frame
               ;; No sound yet - it needs an audio pipeline of its own.
               :emulateSound false})
-   #js {:frameStarted false :frames 0 :monitor nil}))
+   #js {:frameStarted false :frames 0 :monitor nil
+        :scrollCaptured false :scrollX 0 :scrollY 0}))

@@ -11,3 +11,8 @@
 ;; Bumped after every hot reload. Used by
 ;; nes.ui/error-boundary to retry rendering once you've fixed an error.
 (defonce reload-count (r/atom 0))
+
+;; Tools that only exist in development builds register themselves here
+;; (see src/dev), so the UI can offer them without depending on them.
+;; A map of keyword -> {:label "..." :action (fn [])}.
+(defonce dev-tools (r/atom {}))

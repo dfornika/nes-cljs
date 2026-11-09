@@ -5,11 +5,14 @@
             [nes.console :as console]
             [nes.rom :as rom]
             [nes.screen :as screen]
+            [nes.background-view :refer [background-view]]
             [nes.cpu-view :refer [cpu-view]]
+            [nes.lens-view :refer [lens-view]]
+            [nes.palette-view :refer [palette-view]]
             [nes.schematic :refer [schematic-view]]
             [nes.sprites-view :refer [sprites-view]]
             [nes.memory-view :refer [memory-view]]
-            [nes.state :refer [db]]
+            [nes.state :refer [db dev-tools]]
             [nes.tiles-view :refer [tiles-view]]
             [nes.ui :as ui]))
 
@@ -181,8 +184,11 @@
    {:id :cartridge :label "Cartridge" :view rom-info}
    {:id :cpu :label "CPU" :view cpu-view}
    {:id :memory :label "Memory" :view memory-view}
+   {:id :lens :label "Lens" :view lens-view}
    {:id :tiles :label "Tiles (CHR)" :view tiles-view}
-   {:id :sprites :label "Sprites (OAM)" :view sprites-view}])
+   {:id :sprites :label "Sprites (OAM)" :view sprites-view}
+   {:id :background :label "Background" :view background-view}
+   {:id :palettes :label "Palettes" :view palette-view}])
 
 (defn- inspector
   "The tabbed panel of views into the console's insides."
@@ -190,7 +196,7 @@
   (let [current (or (:inspector-tab @db) :schematic)
         {:keys [view]} (some #(when (= current (:id %)) %) tabs)]
     [:div {:style (merge panel-style {:padding 0})}
-     [:div {:style {:display "flex" :border-bottom "1px solid #d0d7de"}}
+     [:div {:style {:display "flex" :flex-wrap "wrap" :border-bottom "1px solid #d0d7de"}}
       (for [{:keys [id label]} tabs]
         ^{:key id}
         [:button {:on-click #(swap! db assoc :inspector-tab id)
@@ -208,7 +214,11 @@
   ""
   []
   [:div {:style {:max-width "1400px" :margin "0 auto" :padding "16px"}}
-   [:h1 {:style {:margin "0 0 12px"}} "NES.cljs"]
+   [:div {:style {:display "flex" :align-items "center" :gap "16px" :margin "0 0 12px"}}
+    [:h1 {:style {:margin 0}} "NES.cljs"]
+    ;; development-only tools (see src/dev)
+    (for [[k {:keys [label title action]}] @dev-tools]
+      ^{:key k} [:button {:on-click action :title title} label])]
    [ui/error-boundary
     [:div {:style {:display "flex" :gap "16px" :flex-wrap "wrap" :align-items "flex-start"}}
      [:div {:style {:display "flex" :flex-direction "column" :gap "12px" :width "512px"}}

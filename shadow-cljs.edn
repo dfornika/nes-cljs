@@ -4,7 +4,9 @@
                 :output-dir "resources/public/js"
                 :asset-path "/js"
                 ;; the REPL starts in nes.repl, with its tools at hand
-                :devtools {:repl-init-ns nes.repl}
+                :devtools {:repl-init-ns nes.repl
+                           ;; dev-only code, left out of release builds
+                           :preloads [nes.dev.portal]}
                 :modules {:main
                           {:init-fn nes.main/init}}
                 :build-hooks [(shadow.cljs.build-report/hook {:output-to "build-reports/report.html"})]

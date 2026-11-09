@@ -13,6 +13,8 @@ committed to; pick whatever looks fun.
 - [x] **REPL tools** – `nes.repl` (rd / poke! / regs / step! / frame! / press! / dis /
   hexdump), immutable snapshots with diff and search, datafy/nav, declarative lenses,
   a first lens for Concentration Room
+- [x] **More views** – Lens tab (live lens fields), Background (nametables + scroll),
+  Palettes; Portal in dev builds
 
 ## Seeing more of the hardware
 
@@ -21,10 +23,8 @@ committed to; pick whatever looks fun.
   draw the CIRAM A10 (mirroring) wire from the cartridge to video RAM
 - [ ] **Sprite viewer follow-ups** – show the 8-sprites-per-scanline limit and sprite 0
   hit; highlight sprites drawn behind the background
-- [ ] **Nametable / background viewer** – all four nametables, the visible
-  "camera" rectangle from the scroll registers, an attribute-table (palette) overlay
-- [ ] **Palette viewer** – the 64-color master palette, with the 32 bytes of palette RAM
-  pointing into it
+- [ ] **Background viewer follow-ups** – show mid-frame scroll changes (status bars) as
+  separate bands; mark which nametables are mirror copies
 - [ ] **Register decoder** – PPUCTRL / PPUMASK / PPUSTATUS shown as named bits
 - [ ] **Partial frames while stepping** – show the picture as far as the PPU has drawn
   it, with a marker at the current scanline and dot
@@ -32,11 +32,9 @@ committed to; pick whatever looks fun.
 
 ## REPL-driven development
 
-- [ ] **Portal** – add Portal to the dev build so `(tap-snap!)` opens a browsable view
 - [ ] **Match lenses by ROM hash** (e.g. SHA-1 of PRG+CHR) instead of file name
 - [ ] **Snapshot history** – keep the last few seconds of per-frame snapshots; ask
   "when did $0075 last change?"
-- [ ] **Watch list from a lens** – show a game's lens fields live in the UI
 - [ ] **Restore a snapshot** – needs full state (jsnes `toJSON`), not just memory
 - [ ] **Finish the croom lens** – which card the pointer actually selects; whether
   poking tries-left shows on screen after the next miss

@@ -44,14 +44,19 @@
   (ppu-state [emu]
     "Where the PPU is in drawing the picture: `:scanline` (-1 to 260;
     0-239 are visible) and `:dot` (0-340, the position along the line),
-    plus `:frame` (frames since the cartridge was loaded).")
+    plus `:frame` (frames since the cartridge was loaded), and `:scroll`,
+    {:x :y}: where in the 512x480 space of the four nametables the top-left
+    of the picture was this frame, as of the first visible line.")
   (oam [emu]
     "The PPU's sprite memory (OAM, 'object attribute memory') as a
     256-byte Uint8Array: 64 sprites of 4 bytes each (Y, tile, attributes, X).")
   (ppu-flags [emu]
     "The PPU's current settings from PPUCTRL and PPUMASK, as a map:
     `:nmi?` `:sprite-height` (8 or 16) `:bg-table` `:sprite-table` (0 or 1)
-    `:show-bg?` `:show-sprites?`"))
+    `:show-bg?` `:show-sprites?`")
+  (mirroring [emu]
+    "How the cartridge arranges the nametables right now: :horizontal,
+    :vertical, :single-screen or :four-screen. (Some mappers change it.)"))
 
 (defprotocol Poke
   "Changing the emulated machine's memory from outside, for experiments."

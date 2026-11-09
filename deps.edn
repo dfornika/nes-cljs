@@ -10,6 +10,8 @@
         io.github.babashka/sci.configs {:git/sha "f3ca6e2ddf59f4e79e2f07d977cae416949135c2"}}
  :aliases {:dev {:extra-paths ["src/dev"]
                  :extra-deps {thheller/shadow-cljs {:mvn/version "3.5.4"}
-                              binaryage/devtools {:mvn/version "1.0.7"}}}
+                              binaryage/devtools {:mvn/version "1.0.7"}
+                              ;; data browser for tap> (dev builds only)
+                              djblue/portal {:mvn/version "0.65.0"}}}
            :test {:extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
                   :extra-paths ["src/test"]}}}
