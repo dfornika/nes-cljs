@@ -3,6 +3,7 @@
   labelled by what each region is for, plus a list of watched addresses."
   (:require [clojure.string :as str]
             [reagent.core :as r]
+            [nes.breakpoints-view :refer [stop-on-write-button]]
             [nes.console :as console]
             [nes.cpu.disasm :refer [hex]]
             [nes.emulator :as emu]
@@ -225,6 +226,8 @@
               (for [[f l] formats] ^{:key f} [:option {:value (name f)} l])]]
             [:td {:style (merge mono {:min-width "110px" :font-size "14px"})}
              (format-value (peek-fn emulator space) addr format)]
+            [:td {:style {:padding-right "6px"}}
+             (when (= space :cpu) [stop-on-write-button addr])]
             [:td [:button {:on-click #(toggle-watch! space addr) :title "Stop watching"} "×"]]])]])]))
 
 (defn memory-view []

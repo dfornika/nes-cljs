@@ -8,6 +8,7 @@
   `db`."
   (:require [reagent.core :as r]
             [nes.audio :as audio]
+            [nes.breakpoints :as bp]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.rom :as rom]
@@ -127,6 +128,8 @@
 ;; nes.input (which depends on this namespace, so can't be called directly).
 (defonce input-poller (atom nil))
 
+(declare stop-at-breakpoint!)
+
 (defn- tick [ts]
   (when (running?)
     (let [{:keys [last-ts behind-ms]} @clock
@@ -136,12 +139,16 @@
           frames (js/Math.floor (/ behind frame-ms))]
       (try
         (when-let [poll @input-poller] (poll))
-        (dotimes [_ frames] (emu/frame! @emulator))
-        (when (>= (- ts @last-inspect) inspect-interval-ms)
-          (reset! last-inspect ts)
-          (refresh-inspectors!))
-        (swap! clock assoc :last-ts ts :behind-ms (- behind (* frames frame-ms)))
-        (schedule!)
+        (if-let [hit (loop [n frames]
+                       (when (pos? n)
+                         (or (emu/frame! @emulator) (recur (dec n)))))]
+          (stop-at-breakpoint! hit)
+          (do
+            (when (>= (- ts @last-inspect) inspect-interval-ms)
+              (reset! last-inspect ts)
+              (refresh-inspectors!))
+            (swap! clock assoc :last-ts ts :behind-ms (- behind (* frames frame-ms)))
+            (schedule!)))
         (catch :default e
           (js/console.error e)
           (swap! db assoc :status :crashed :error (ex-message e)))))))
@@ -157,9 +164,58 @@
 
 (defn resume! []
   (when (and @emulator (#{:paused} (:status @db)))
-    (swap! db assoc :status :running)
+    (swap! db assoc :status :running :break nil)
     (swap! clock assoc :last-ts nil :behind-ms 0)
     (schedule!)))
+
+;; ---------------------------------------------------------------------------
+;; Breakpoints
+;;
+;; The list lives in `db` (so the page shows it) under :breakpoints, and is
+;; handed to the emulator whenever it changes. See nes.breakpoints.
+
+(defn breakpoints [] (:breakpoints @db []))
+
+(defn- sync-breakpoints! []
+  (when-let [e @emulator]
+    (emu/set-breakpoints! e (breakpoints))))
+
+(defonce ^:private breakpoint-watch
+  (do (add-watch db ::breakpoints
+                 (fn [_ _ old new]
+                   (when-not (identical? (:breakpoints old) (:breakpoints new))
+                     (sync-breakpoints!))))
+      true))
+
+(defn add-breakpoint!
+  "Add a breakpoint (a map with at least :kind and :addr, see
+  nes.breakpoints). Returns its id."
+  [b]
+  (let [id (inc (:next-breakpoint-id @db 0))]
+    (swap! db (fn [d]
+                (-> d
+                    (assoc :next-breakpoint-id id)
+                    (update :breakpoints (fnil conj [])
+                            (merge {:enabled? true :hits 0} b {:id id})))))
+    id))
+
+(defn update-breakpoint! [id f & args]
+  (swap! db update :breakpoints
+         (fn [bps] (mapv #(if (= id (:id %)) (apply f % args) %) bps))))
+
+(defn remove-breakpoint! [id]
+  (swap! db update :breakpoints (fn [bps] (filterv #(not= id (:id %)) bps))))
+
+(defn clear-breakpoints! []
+  (swap! db assoc :breakpoints []))
+
+(defn toggle-exec-breakpoint!
+  "Add an execute breakpoint at `addr`, or remove the one that's there."
+  [addr]
+  (if-let [b (some #(when (and (= :exec (:kind %)) (= addr (:addr %)) (nil? (:end %))) %)
+                   (breakpoints))]
+    (remove-breakpoint! (:id b))
+    (add-breakpoint! {:kind :exec :addr addr})))
 
 (defn- show-picture-so-far!
   "After stepping: if the PPU is partway through the picture, show it
@@ -170,6 +226,21 @@
     (screen/draw-partial! pixels line (:dot (emu/ppu-state e)))
     (screen/redraw!)))
 
+(defn- stop-at-breakpoint!
+  "A breakpoint went off while running: pause there and say why."
+  [hit]
+  (when-let [id (get-in hit [:breakpoint :id])]
+    (update-breakpoint! id update :hits (fnil inc 0)))
+  (swap! db assoc :status :paused :break hit)
+  (audio/clear!)
+  (show-picture-so-far! @emulator)
+  (refresh-inspectors!))
+
+(defn break-reason
+  "Why the emulator last stopped at a breakpoint, in words, or nil."
+  []
+  (some-> (:break @db) bp/describe-hit))
+
 (defn while-paused!
   "Run `f` on the emulator if it's paused, then refresh the inspectors.
   Returns true if `f` ran."
@@ -178,6 +249,8 @@
     ;; Throw away activity from before this step, so the sample taken
     ;; afterwards covers exactly this step.
     (when @bus-monitor? (emu/take-bus-activity! @emulator))
+    ;; whatever stopped us before is old news after a step
+    (swap! db assoc :break nil)
     (try
       (f @emulator)
       (show-picture-so-far! @emulator)
@@ -188,9 +261,14 @@
     true))
 
 (defn step-frame!
-  "Run until the end of the current frame, then stay paused."
+  "Run until the end of the current frame (or a breakpoint), then stay
+  paused."
   []
-  (while-paused! emu/frame!))
+  (while-paused! (fn [e]
+                   (when-let [hit (emu/frame! e)]
+                     (when-let [id (get-in hit [:breakpoint :id])]
+                       (update-breakpoint! id update :hits (fnil inc 0)))
+                     (swap! db assoc :break hit)))))
 
 (defn step-instruction!
   "Run exactly one CPU instruction, then stay paused."
@@ -242,6 +320,7 @@
         (emu/set-audio-sink! e on-audio-sample)
         (emu/load-rom! e bytes)
         (emu/monitor-bus! e @bus-monitor?)
+        (emu/set-breakpoints! e (breakpoints))
         (reset! emulator e)
         (reset! bus-log [])
         (reset! bus-activity nil)

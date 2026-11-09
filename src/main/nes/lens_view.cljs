@@ -2,6 +2,7 @@
   "The Lens tab: the loaded game's variables, named and decoded by its lens
   (see nes.lens), updating live."
   (:require [reagent.core :as r]
+            [nes.breakpoints-view :refer [stop-on-write-button]]
             [nes.console :as console]
             [nes.cpu.disasm :refer [hex]]
             [nes.lens :as lens]
@@ -80,8 +81,9 @@
                       (memory-view/show! :cpu (- addr (mod addr 16)))
                       (swap! db assoc :inspector-tab :memory))}
       (hex addr 4)]
-     (when (seq args)
-       [:span {:style muted} " " (pr-str (if (= type :struct) (vec (take-nth 2 (first args))) (first args)))])]))
+     (when (and (seq args) (not (#{:enum :bits} type)))
+       [:span {:style muted} " " (pr-str (if (= type :struct) (vec (take-nth 2 (first args))) (first args)))])
+     " " [stop-on-write-button addr]]))
 
 ;; ---------------------------------------------------------------------------
 

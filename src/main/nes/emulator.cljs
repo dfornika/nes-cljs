@@ -9,7 +9,11 @@
 (defprotocol Emulator
   (load-rom! [emu bytes] "Insert a cartridge: `bytes` is a Uint8Array of an iNES file.")
   (press-reset! [emu] "Press the console's reset button.")
-  (frame! [emu] "Run the emulator until the PPU has drawn one full frame.")
+  (frame! [emu]
+    "Run the emulator until the PPU has drawn one full frame. Returns nil,
+    or, if a breakpoint (see `Debug`) stopped it first, the hit:
+    {:kind :exec/:read/:write, :addr, :value, :pc, :breakpoint}.
+    Calling it again carries on from there.")
   (step-instruction! [emu]
     "Run exactly one CPU instruction. Returns true if that finished a frame.")
   (button-down! [emu player button] "Press `button` (a keyword like :a or :up) on controller `player` (1 or 2).")
@@ -96,3 +100,9 @@
     off. A map of `:counts` (counter keyword -> number), `:events` (I/O
     register accesses), `:accesses` (the most recent individual accesses)
     and `:dropped`."))
+
+(defprotocol Debug
+  "Stopping the emulator when something happens. See nes.breakpoints."
+  (set-breakpoints! [emu bps]
+    "Use `bps` (a seq of breakpoint maps, see nes.breakpoints) from now
+    on. `frame!` stops at them; single steps don't."))

@@ -11,6 +11,7 @@
   with a copy of jsnes's frame loop (`NES.frame` in jsnes/src/nes.js)
   split into one-instruction steps."
   (:require ["jsnes" :refer [NES Controller]]
+            [nes.breakpoints :as bp]
             [nes.emulator :as emu]
             [nes.emulator.jsnes-monitor :as monitor]))
 
@@ -61,9 +62,45 @@
     (set! (.-scrollX state) (+ (* 256 (.-regH ppu)) (* 8 (.-regHT ppu)) (.-regFH ppu)))
     (set! (.-scrollY state) (+ (* 240 (.-regV ppu)) (* 8 (.-regVT ppu)) (.-regFV ppu)))))
 
+(defn- exec-break?
+  "Should we stop before running the instruction at `pc`? If so, records
+  the hit. An instruction we just stopped at runs on the next try,
+  rather than stopping again."
+  [^js state pc]
+  (let [^js flags (.-bpFlags state)]
+    (if (and flags
+             (pos? (bit-and (aget flags pc) bp/flag-exec))
+             (not= pc (.-skipExec state)))
+      (if-let [b (bp/matching (.-bps state) {:kind :exec :addr pc :pc pc})]
+        (do (set! (.-hit state) {:kind :exec :addr pc :pc pc :breakpoint b})
+            (set! (.-skipExec state) pc)
+            true)
+        false)
+      (do (set! (.-skipExec state) -1)
+          false))))
+
+(defn- watch-fn
+  "The function the memory-access wrappers call on every CPU read and
+  write while read/write breakpoints are set: it records the first access
+  in an instruction that sets one off, and `step!` stops afterwards."
+  [^js state]
+  (fn [addr v write?]
+    (let [^js flags (.-bpFlags state)
+          f (if write? bp/flag-write bp/flag-read)]
+      (when (and flags
+                 (pos? (bit-and (aget flags (bp/normalize addr)) f))
+                 (nil? (.-hit state)))
+        (let [hit {:kind (if write? :write :read) :addr addr :value v
+                   :pc (.-instrPc state)}]
+          (when-let [b (bp/matching (.-bps state) hit)]
+            (set! (.-hit state) (assoc hit :breakpoint b))))))))
+
 (defn- step!
   "Run one CPU instruction (first finishing any DMA transfer that has the
-  CPU paused). Returns true if the PPU finished a frame meanwhile.
+  CPU paused). Returns true if the PPU finished a frame meanwhile, or
+  :break if a breakpoint went off (before the instruction, for execute
+  breakpoints; after it, for reads and writes), with the hit in
+  `state.hit`.
   `state` is a JS object holding `frameStarted` and `frames`."
   [^js nes ^js state]
   (when (.-crashed nes)
@@ -84,22 +121,30 @@
             (set! (.-cyclesToHalt cpu) (- (.-cyclesToHalt cpu) chunk))
             (set! (.-_cpuCycleBase cpu) (+ (.-_cpuCycleBase cpu) chunk))
             (if (frame-ended? ppu state) true (recur)))
-          ;; The PPU runs alongside, inside the CPU's memory accesses.
-          (let [cycles (.emulate cpu)]
-            (.clockFrameCounter papu cycles (.-apuCatchupCycles cpu))
-            (set! (.-apuCatchupCycles cpu) 0)
-            (capture-scroll! ppu state)
-            (boolean (frame-ended? ppu state)))))
+          (let [pc (bit-and (inc (.-REG_PC cpu)) 0xFFFF)]
+            (if (exec-break? state pc)
+              :break
+              ;; The PPU runs alongside, inside the CPU's memory accesses.
+              (let [_ (set! (.-instrPc state) pc)
+                    cycles (.emulate cpu)]
+                (.clockFrameCounter papu cycles (.-apuCatchupCycles cpu))
+                (set! (.-apuCatchupCycles cpu) 0)
+                (capture-scroll! ppu state)
+                (let [ended? (frame-ended? ppu state)]
+                  (if (.-hit state) :break (boolean ended?))))))))
       (catch :default e
         (set! (.-crashed nes) true)
         (throw e)))))
 
 (defn- reinstall-monitor!
-  "jsnes builds a new CPU, PPU and mapper on reset and ROM load, so the
-  bus monitor has to be put back on the new ones."
+  "Put the memory-access wrappers on jsnes's CPU and mapper if the bus
+  monitor or a read/write breakpoint needs them, and take them off if
+  not. (jsnes builds a new CPU, PPU and mapper on reset and ROM load, so
+  this is also called then.)"
   [^js nes ^js state]
-  (when-let [m (.-monitor state)]
-    (monitor/install! nes m)))
+  (if (or (.-monitor state) (.-watch state))
+    (monitor/install! nes state)
+    (monitor/uninstall! nes)))
 
 (defrecord JsnesEmulator [^js nes ^js state]
   emu/Emulator
@@ -113,8 +158,25 @@
     (set! (.-frameStarted state) false)
     (reinstall-monitor! nes state))
   (frame! [_]
-    (loop [] (when-not (step! nes state) (recur))))
-  (step-instruction! [_] (step! nes state))
+    (set! (.-hit state) nil)
+    (loop []
+      (let [r (step! nes state)]
+        (cond
+          (= r :break) (let [hit (.-hit state)]
+                         (set! (.-hit state) nil)
+                         hit)
+          r nil
+          :else (recur)))))
+  (step-instruction! [_]
+    ;; single steps ignore breakpoints
+    (let [flags (.-bpFlags state)]
+      (set! (.-bpFlags state) nil)
+      (try
+        (true? (step! nes state))
+        (finally
+          (set! (.-bpFlags state) flags)
+          (set! (.-skipExec state) -1)
+          (set! (.-hit state) nil)))))
   (button-down! [_ player button]
     (when-let [code (button-codes button)]
       (.buttonDown nes player code)))
@@ -231,15 +293,26 @@
   (monitor-bus! [_ on?]
     (cond
       (and on? (not (.-monitor state)))
-      (let [m (monitor/create)]
-        (set! (.-monitor state) m)
-        (monitor/install! nes m))
+      (do (set! (.-monitor state) (monitor/create))
+          (reinstall-monitor! nes state))
       (and (not on?) (.-monitor state))
-      (do (monitor/uninstall! nes)
-          (set! (.-monitor state) nil))))
+      (do (set! (.-monitor state) nil)
+          (reinstall-monitor! nes state))))
   (take-bus-activity! [_]
     (when-let [m (.-monitor state)]
-      (monitor/take! m))))
+      (monitor/take! m)))
+
+  emu/Debug
+  (set-breakpoints! [_ bps]
+    (let [bps (vec bps)
+          flags (bp/flags bps)]
+      (set! (.-bps state) bps)
+      (set! (.-bpFlags state) flags)
+      ;; only wrap memory accesses if a read/write breakpoint needs it
+      (set! (.-watch state)
+            (when (some #(and (:enabled? %) (not= :exec (:kind %))) bps)
+              (watch-fn state)))
+      (reinstall-monitor! nes state))))
 
 (defn create
   "Make a jsnes-backed emulator.
@@ -251,4 +324,6 @@
    (NES. #js {:onFrame on-frame
               :sampleRate emu/sample-rate})
    #js {:frameStarted false :frames 0 :monitor nil
-        :scrollCaptured false :scrollX 0 :scrollY 0}))
+        :scrollCaptured false :scrollX 0 :scrollY 0
+        ;; breakpoints: see emu/Debug
+        :bps [] :bpFlags nil :watch nil :hit nil :skipExec -1 :instrPc 0}))

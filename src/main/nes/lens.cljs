@@ -29,6 +29,9 @@
                             significant first (very common on the NES)
     [:bool addr]            true if the byte isn't 0
     [:bits addr {k bit}]    named single bits of one byte
+    [:enum addr {n name}]   a byte that stands for one of a few things,
+                            e.g. {0 \"air\" 1 \"ground\"}; values not
+                            listed come out as the number
     [:array addr n type]    n values of a fixed-size type, one after another
     [:struct addr [k type ...]]  fields of fixed-size types, one after another
     [:fn f]                 anything else: (f snapshot)"
@@ -65,6 +68,9 @@
                    0 (snapshot/cpu-bytes s addr n)))
     :digits (let [[n] args]
               (reduce (fn [acc d] (+ (* acc 10) d)) 0 (snapshot/cpu-bytes s addr n)))
+    :enum (let [[names] args
+                b (byte-at s addr)]
+            (get names b b))
     :bits (let [[names] args
                 b (byte-at s addr)]
             (into {} (for [[k bit] names] [k (bit-test b bit)])))

@@ -95,6 +95,18 @@ try {
   await page.click('button:text-is("Run")');
   check(true, 'pause / step / run');
 
+  // Breakpoints: stop at the start of the NMI handler, which runs every frame.
+  await page.click('button:text-is("CPU")');
+  const nmi = (await page.locator('tr[title^="Where the CPU jumps each time"] td').nth(3).textContent()).trim();
+  await page.selectOption('form select', 'exec');
+  await page.fill('form input[placeholder="$addr"]', nmi);
+  await page.click('form button:text-is("Add")');
+  const stopped = await page.waitForSelector('text=Stopped at a breakpoint:', {timeout: 3000}).then(() => true, () => false);
+  const pc = (await page.locator('[title^="Program counter"] div').nth(1).textContent()).trim();
+  check(stopped && pc === nmi, `breakpoint: stops at the NMI handler (${nmi}, PC ${pc})`);
+  await page.click('button[title="Remove"]');
+  await page.click('button:text-is("Continue")');
+
   // Big-screen mode: the inspectors move into a drawer at the bottom.
   await page.click('button:text-is("Big screen")');
   await page.click('.drawer-handle');

@@ -1,7 +1,8 @@
 (ns nes.cpu-view
   "The CPU inspector: registers, status flags, the code about to run, and
   the stack."
-  (:require [nes.console :as console]
+  (:require [nes.breakpoints-view :refer [breakpoints-panel]]
+            [nes.console :as console]
             [nes.cpu.disasm :as disasm :refer [hex]]
             [nes.cpu.opcodes :as ops]
             [nes.emulator :as emu]
@@ -63,13 +64,22 @@
 
 (defn- code-listing [emulator pc]
   (let [peek #(emu/cpu-peek emulator %)
-        instrs (disasm/disassemble peek pc 16)]
+        instrs (disasm/disassemble peek pc 16)
+        exec-bps (into {} (for [b (console/breakpoints)
+                                :when (and (= :exec (:kind b)) (nil? (:end b)))]
+                            [(:addr b) b]))]
     [:table {:style (merge mono {:border-collapse "collapse" :font-size "13px"})}
      [:tbody
       (for [[i {:keys [addr bytes mnemonic mode] :as instr}] (map-indexed vector instrs)]
         ^{:key i}
         [:tr {:style {:background (when (zero? i) "#fff8c5")}}
-         [:td {:style {:padding "1px 6px" :width "14px"}} (when (zero? i) "▶")]
+         (let [b (exec-bps addr)]
+           [:td {:style {:padding "1px 2px 1px 6px" :width "12px" :cursor "pointer"
+                         :color (if (and b (:enabled? b)) "#cf222e" "#d0d7de")}
+                 :title (if b "Remove the breakpoint here" "Stop before running this instruction")
+                 :on-click #(console/toggle-exec-breakpoint! addr)}
+            "●"])
+         [:td {:style {:padding "1px 6px 1px 2px" :width "14px"}} (when (zero? i) "▶")]
          [:td {:style {:padding "1px 6px" :color "#0969da"}} (subs (hex addr 4) 1)]
          [:td {:style (merge muted {:padding "1px 6px" :white-space "pre"})}
           (.padEnd (apply str (interpose " " (map #(if % (subs (hex % 2) 1) "??") bytes))) 8)]
@@ -134,10 +144,13 @@
         "Frame " frame " · scanline " scanline " · dot " dot " · CPU cycle " cycles
         (when (<= 241 scanline 260) " · in vertical blank")]
        [:div {:style {:display "flex" :gap "32px" :flex-wrap "wrap"}}
-        [section "Next instructions" [code-listing emulator pc]]
+        [section "Next instructions" [code-listing emulator pc]
+         [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
+          "Click a ● to stop there."]]
         [:div
          [section "Stack" [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px"})}
                            "Most recently pushed first"]
           [stack-view emulator sp]]
-         [section "Interrupt vectors" [vector-table emulator]]]]])
+         [section "Interrupt vectors" [vector-table emulator]]]]
+       [section "Breakpoints" [breakpoints-panel]]])
     [:p {:style muted} "Load a ROM to see the CPU."]))

@@ -41,6 +41,10 @@ committed to; pick whatever looks fun.
 - [ ] **Lens fields with notes** (e.g. "approximate") and units, shown in the Lens tab
 - [ ] **Edit a lens value from the Lens tab** (poke through the lens)
 - [ ] **Lenses for the other sample ROMs** (Thwaite, 240p Test Suite)
+- [x] **Mega Man 2 lenses** from Data Crystal's RAM map, checked against the game
+- [ ] **ROM lenses** – read data from the cartridge (e.g. Data Crystal's ROM maps: damage
+  tables, speeds) by file offset, not just RAM
+- [ ] **Text tables** (Data Crystal's .tbl files) – decode text in the nametables
 - [ ] **Snapshot history** – keep the last few seconds of per-frame snapshots; ask
   "when did $0075 last change?"
 - [ ] **Restore a snapshot** – needs full state (jsnes `toJSON`), not just memory
@@ -49,8 +53,11 @@ committed to; pick whatever looks fun.
 
 ## Debugging tools
 
-- [ ] **Breakpoints** – stop on executing an address, or reading or writing one
-  (watchpoints). The instruction-stepping loop in `nes.emulator.jsnes` is where they'd go
+- [x] **Breakpoints** – execute / read / write / access, address ranges, a value to match,
+  conditions from the REPL; gutter dots in the CPU tab, "on write" buttons in the Memory
+  and Lens tabs; `break!` / `breaks` / `unbreak!` / `why` / `continue!`
+- [ ] **Breakpoint follow-ups** – remember them per ROM; stop on NMI / IRQ; stop on a PPU
+  register write at a given scanline; log instead of stopping (tracepoints)
 - [ ] **Step over / step out / run to line** in the disassembly
 - [ ] **Symbolic disassembly** – show `STA PPUCTRL` instead of `STA $2000`, and let
   users name addresses

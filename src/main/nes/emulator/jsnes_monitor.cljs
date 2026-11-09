@@ -98,9 +98,17 @@
   (and (<= 0x2000 addr 0x3FFF) (= 7 (bit-and addr 7))))
 
 (defn install!
-  "Start monitoring `nes` (a jsnes NES) into monitor `m`. Call again after
-  jsnes replaces its CPU or mapper (it does on reset and ROM load)."
-  [^js nes ^js m]
+  "Wrap `nes`'s (a jsnes NES) memory-access methods so that every access
+  is reported to whichever of these `state` (a JS object) holds:
+
+  - `state.monitor`: a monitor from `create`, which counts and records
+    accesses
+  - `state.watch`: a function (watch addr value write?), called for every
+    CPU read and write (used for read/write breakpoints)
+
+  Either can be added or removed later without reinstalling. Call this
+  again after jsnes replaces its CPU or mapper (on reset and ROM load)."
+  [^js nes ^js state]
   (let [^js cpu (.-cpu nes)
         ^js ppu (.-ppu nes)
         ^js mmap (.-mmap nes)
@@ -112,41 +120,58 @@
         write (orig "write")
         push (orig "push")
         pull (orig "pull")
-        nmi (orig "doNonMaskableInterrupt")]
-    ;; RAM accesses. (Everything else reaches the mapper, wrapped below.)
+        nmi (orig "doNonMaskableInterrupt")
+        ram! (fn [addr v write?]
+               (when-let [m (.-monitor state)]
+                 (when (< addr 0x2000) (ram-access! m addr v write?))))
+        watch! (fn [addr v write?]
+                 (when-let [f (.-watch state)] (f addr v write?)))]
+    ;; Every CPU access goes through these. (RAM accesses are counted here;
+    ;; the monitor counts everything else in the mapper's methods, below.)
     (set! (.-load cpu)
           (fn [addr]
             (let [v (.call load cpu addr)]
-              (when (< addr 0x2000) (ram-access! m addr v false))
+              (ram! addr v false)
+              (watch! addr v false)
               v)))
     (set! (.-loadDirect cpu)
           (fn [addr]
             (let [v (.call load-direct cpu addr)]
-              (when (< addr 0x2000) (ram-access! m addr v false))
+              (ram! addr v false)
+              (watch! addr v false)
               v)))
     (set! (.-load16bit cpu)
           (fn [addr]
-            (let [v (.call load16 cpu addr)]
+            (let [v (.call load16 cpu addr)
+                  lo (bit-and v 0xFF)
+                  hi (bit-shift-right v 8)]
               (when (< addr 0x1FFF)
-                (ram-access! m addr (bit-and v 0xFF) false)
-                (ram-access! m (inc addr) (bit-shift-right v 8) false))
+                (ram! addr lo false)
+                (ram! (inc addr) hi false))
+              (watch! addr lo false)
+              (watch! (bit-and (inc addr) 0xFFFF) hi false)
               v)))
     (set! (.-write cpu)
           (fn [addr v]
-            (when (< addr 0x2000) (ram-access! m addr v true))
-            (.call write cpu addr v)))
+            (ram! addr v true)
+            (.call write cpu addr v)
+            (watch! addr v true)))
     (set! (.-push cpu)
           (fn [v]
-            (ram-access! m (bit-or 0x100 (bit-and (.-REG_SP cpu) 0xFF)) v true)
-            (.call push cpu v)))
+            (let [addr (bit-or 0x100 (bit-and (.-REG_SP cpu) 0xFF))]
+              (ram! addr v true)
+              (.call push cpu v)
+              (watch! addr v true))))
     (set! (.-pull cpu)
           (fn []
-            (let [v (.call pull cpu)]
-              (ram-access! m (bit-or 0x100 (bit-and (.-REG_SP cpu) 0xFF)) v false)
+            (let [v (.call pull cpu)
+                  addr (bit-or 0x100 (bit-and (.-REG_SP cpu) 0xFF))]
+              (ram! addr v false)
+              (watch! addr v false)
               v)))
     (set! (.-doNonMaskableInterrupt cpu)
           (fn [status]
-            (bump! m "nmi" 1)
+            (when-let [m (.-monitor state)] (bump! m "nmi" 1))
             (.call nmi cpu status)))
     (when mmap
       (let [mproto (.getPrototypeOf js/Object mmap)
@@ -154,19 +179,22 @@
             mwrite (aget mproto "write")]
         (set! (.-load mmap)
               (fn [addr]
-                (let [target (when (ppudata? addr) (ppudata-target ppu))
-                      v (.call mload mmap addr)]
-                  (when target (bump! m target 1))
-                  (bus-access! m ppu addr v false)
-                  v)))
+                (if-let [m (.-monitor state)]
+                  (let [target (when (ppudata? addr) (ppudata-target ppu))
+                        v (.call mload mmap addr)]
+                    (when target (bump! m target 1))
+                    (bus-access! m ppu addr v false)
+                    v)
+                  (.call mload mmap addr))))
         (set! (.-write mmap)
               (fn [addr v]
-                (when (ppudata? addr) (bump! m (ppudata-target ppu) 1))
-                (bus-access! m ppu addr v true)
+                (when-let [m (.-monitor state)]
+                  (when (ppudata? addr) (bump! m (ppudata-target ppu) 1))
+                  (bus-access! m ppu addr v true))
                 (.call mwrite mmap addr v)))))))
 
 (defn uninstall!
-  "Stop monitoring: remove the wrappers so jsnes's own methods take over."
+  "Remove the wrappers so jsnes's own methods take over."
   [^js nes]
   (let [^js cpu (.-cpu nes)
         ^js mmap (.-mmap nes)]

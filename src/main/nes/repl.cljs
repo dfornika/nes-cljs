@@ -24,6 +24,11 @@
     (diff a b)               ; which bytes changed?
     (search [a b] (fn [before after] (= after (inc before))))
 
+    (break! :write 0x003F)   ; pause when the game writes $003F
+    (break! 0xC123)          ; pause before running the instruction at $C123
+    (why) (dis) (continue!)  ; why it stopped, the code there, and carry on
+    (breaks) (unbreak!)      ; list, or remove all, breakpoints
+
     (look)                   ; the game's state through its lenses
     (lenses)                 ; which lenses the loaded game has
     (lens! \"Player\" {:lives [:u8 0x075A]})  ; try out a lens; it shows in the Lens tab
@@ -33,11 +38,13 @@
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
             [nes.console :as console]
+            [nes.breakpoints :as bp]
             [nes.cpu.disasm :as disasm]
             [nes.emulator :as emu]
             [nes.lens :as lens]
             ;; game-specific lenses register themselves when loaded
             [nes.lenses.croom]
+            [nes.lenses.megaman2]
             [nes.snapshot :as snapshot]
             [nes.state :refer [db]]))
 
@@ -113,6 +120,53 @@
   ([n]
    (paused! (fn [e] (dotimes [_ n] (emu/step-instruction! e))))
    (regs)))
+
+(defn break!
+  "Pause the game when something happens:
+
+    (break! 0xC123)                  ; before running the instruction at $C123
+    (break! :write 0x003F)           ; when $003F is written
+    (break! :read 0x2002)            ; when $2002 is read
+    (break! :access [0x0300 0x033F]) ; on any read or write in a range
+    (break! :write 0x003F {:value 0}) ; only when 0 is written
+    (break! :write 0x0055 {:when (fn [{:keys [value]}] (> value 200))})
+
+  Returns the breakpoint's id. While running, the game pauses there; use
+  (why) to see what happened and (continue!) to carry on."
+  ([addr] (break! :exec addr))
+  ([kind addr] (break! kind addr {}))
+  ([kind addr opts]
+   (assert (some #{kind} bp/kinds) (str "kind is one of " bp/kinds))
+   (let [[lo hi] (if (vector? addr) addr [addr nil])]
+     (console/add-breakpoint! (cond-> (merge (select-keys opts [:value :when]) {:kind kind :addr lo})
+                                hi (assoc :end hi))))))
+
+(defn breaks
+  "The breakpoints, described."
+  []
+  (mapv (fn [{:keys [id enabled? hits] :as b}]
+          (cond-> {:id id :breakpoint (bp/describe b) :hits hits}
+            (not enabled?) (assoc :enabled? false)))
+        (console/breakpoints)))
+
+(defn unbreak!
+  "Remove breakpoint `id`, or with no argument, all of them."
+  ([] (console/clear-breakpoints!) [])
+  ([id] (console/remove-breakpoint! id) (breaks)))
+
+(defn why
+  "Why the game last stopped at a breakpoint: the hit, described, or nil."
+  []
+  (when-let [hit (:break @db)]
+    (-> hit
+        (update :breakpoint #(select-keys % [:id :kind :addr :end :value]))
+        (assoc :reason (bp/describe-hit hit)))))
+
+(defn continue!
+  "Carry on running after a breakpoint (or a pause)."
+  []
+  (console/resume!)
+  :running)
 
 (defn line!
   "Pause, and run until the PPU starts the next scanline, `n` times

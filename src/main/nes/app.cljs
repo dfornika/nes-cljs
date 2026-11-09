@@ -6,6 +6,7 @@
             [nes.rom :as rom]
             [nes.screen :as screen]
             [nes.background-view :refer [background-view]]
+            [nes.breakpoints-view :refer [break-notice]]
             [nes.cpu-view :refer [cpu-view]]
             [nes.drawer :refer [drawer]]
             [nes.input :as input]
@@ -331,6 +332,7 @@
       [:main {:class "app-main"}
        [:div {:class "console-column"}
         [screen-area]
+        [break-notice]
         [:div {:class "console-buttons"}
          [controls]
          [sound-and-speed]]
