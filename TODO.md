@@ -74,6 +74,38 @@ committed to; pick whatever looks fun.
   snapshots enables time travel and diffing two moments
 - [ ] **Persist the watch list** per ROM in localStorage
 
+## Code lenses: finding and naming subroutines
+
+Lenses for code: name a game's subroutines, and find them automatically.
+In an experiment (scripts in the conversation, not committed), following
+code statically from the interrupt vectors found 17 subroutines in
+Concentration Room and 7 in Mega Man 2's fixed bank. A minute of play,
+recording what ran, found 40 and 97. Jump tables, data after `JSR`, and
+bank switching defeat static analysis; recording only sees what was
+played. So combine them.
+
+- [ ] **Code/data logger** – while switched on (like the bus monitor), record which PRG ROM
+  bytes ran as code and which were read as data, and every `JSR` with its target's ROM offset
+  (tracking the mapper's bank switches)
+- [ ] **Routine discovery** – a pure function: logged entry points plus static traversal from
+  them (and from the vectors) into a list of routines with their extent, calls and callers
+- [ ] **Routine metadata** – RAM read and written (static and observed); hardware touched,
+  as tags (PPU, controller, sound, bank switching); runs from the main loop or NMI
+- [ ] **Code tab** – the routines, with calls and CPU cycles per frame (a profiler); click
+  one to see it disassembled
+- [ ] **Code lenses** – `{:rom sha1 :name "play sound" :at 0x3C061 :doc ...}`, registered like
+  lenses (by ROM file offset, so banks don't matter), shown in the disassembly and usable
+  for breakpoints by name
+- [ ] **Call stack** while paused, from tracking `JSR`/`RTS` (the push-an-address-and-`RTS`
+  trick will occasionally confuse it)
+- [ ] **"Written by" on lens fields** – which routine changed this value (e.g. Mega Man's
+  HP), from watching writes and mapping the instruction to its routine
+- [ ] **Import/export labels** – FCEUX and Mesen label files; names (not code) from public
+  disassemblies (Zelda 1 by Aldo Nunez, Super Mario Bros.) and Data Crystal's ROM maps
+- [ ] **Recognizing routines by their behavior** – suggest names: writes `$4016` then reads it
+  8 times → reads the controller; writes `$2007` in a loop → copies to video memory
+- [ ] **Our own games' compiler** emits code lenses, so the same tools debug them
+
 ## Playing games properly
 
 - [x] **Sound** – Web Audio (AudioWorklet), volume, remembered on/off
