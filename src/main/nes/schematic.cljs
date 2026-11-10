@@ -288,7 +288,7 @@
         "Wires light up with traffic on the CPU's bus, flowing in the direction the data moves."])]))
 
 (defn- event-line [{:keys [addr value write? repeat frame scanline]}]
-  (let [{:keys [name]} (registers/register-at addr)
+  (let [{:keys [name]} (registers/register-at addr write?)
         desc (registers/describe addr value write?)]
     [:tr
      [:td {:style (merge muted {:padding-right "8px" :white-space "nowrap"})} frame ":" scanline]
@@ -324,7 +324,7 @@
            :let [region (memory-map/region-at :cpu addr)
                  ;; name the I/O register, if it is one (and the mapper,
                  ;; but only for writes: reads of ROM are just ROM)
-                 reg-name (when-let [{:keys [name]} (registers/register-at addr)]
+                 reg-name (when-let [{:keys [name]} (registers/register-at addr write?)]
                             (when (or write? (not= "MAPPER" name)) name))]]
        ^{:key i}
        [:tr

@@ -29,3 +29,8 @@
     ;; Z is set in p, so BEQ is taken and BNE isn't
     (is (= "If the last result was zero, jump to $C012 — it will" (ref/explain (decode [0xF0 0x10]) now)))
     (is (= "If the last result wasn't zero, jump to $C012 — it won't" (ref/explain (decode [0xD0 0x10]) now)))))
+
+(deftest one-address-two-registers
+  ;; $4017 reads controller 2, but a write goes to the sound chip
+  (is (= "Store A into APU_FRAME ($4017)" (ref/explain (decode [0x8D 0x17 0x40]))))
+  (is (= "Load A with JOY2 ($4017)" (ref/explain (decode [0xAD 0x17 0x40])))))

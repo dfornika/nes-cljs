@@ -140,15 +140,17 @@
 (defn- hex [n width] (str "$" (.padStart (.toUpperCase (.toString n 16)) width "0")))
 
 (defn- io
-  "The I/O register at `addr`, if it is one. (Not $8000 and up: writes
-  there go to the mapper, but reads are just ROM.)"
-  [addr]
-  (when (< addr 0x8000) (registers/register-at addr)))
+  "The I/O register at `addr`, if it is one: the one a write goes to, if
+  `write?`. (Not $8000 and up: writes there go to the mapper, but reads
+  are just ROM.)"
+  ([addr] (io addr false))
+  ([addr write?]
+   (when (< addr 0x8000) (registers/register-at addr write?))))
 
 (defn- place
   "An address in words: with the register's name for I/O."
-  [addr]
-  (if-let [{:keys [name]} (io addr)]
+  [addr write?]
+  (if-let [{:keys [name]} (io addr write?)]
     (str name " (" (hex addr 4) ")")
     (hex addr 4)))
 
@@ -171,8 +173,10 @@
 (defn- operand-words
   "What the operand of `ins` refers to, in words. With `now` ({:regs
   :peek}), work out the actual address and its current value."
-  [{:keys [mode operand] :as ins} now]
-  (let [ea (when now (effective-address ins (:regs now) (:peek now)))
+  [{:keys [mnemonic mode operand] :as ins} now]
+  (let [write? (contains? #{:sta :stx :sty} mnemonic)
+        place #(place % write?)
+        ea (when now (effective-address ins (:regs now) (:peek now)))
         value (when (and ea now (not (io ea))) ((:peek now) ea))
         value-words (when value (str " (now " (hex value 2) ")"))]
     (case mode

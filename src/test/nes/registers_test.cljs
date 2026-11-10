@@ -33,3 +33,10 @@
   ;; every register's fields cover each bit exactly once
   (doseq [[_ {:keys [fields]}] regs/bit-fields]
     (is (= (range 8) (sort (mapcat :bits fields))))))
+
+(deftest reads-and-writes-of-4017
+  (is (= "JOY2" (:name (regs/register-at 0x4017))))
+  (is (= "APU_FRAME" (:name (regs/register-at 0x4017 true))))
+  (is (= "JOY1" (:name (regs/register-at 0x4016 true))) "the same register either way")
+  (is (= "4-step sequence, no IRQ" (regs/describe 0x4017 0x40 true)))
+  (is (= "button pressed" (regs/describe 0x4017 0x41 false))))

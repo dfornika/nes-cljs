@@ -68,20 +68,34 @@
     0x4016 {:name "JOY1" :about "Controllers: write 1 then 0 to latch the buttons; read controller 1, one button per read"
             :decode-write (fn [v] (if (bit? v 0) "strobe on (latch buttons)" "strobe off"))
             :decode-read (fn [v] (str "button " (if (bit? v 0) "pressed" "not pressed")))}
-    0x4017 {:name "JOY2" :about "Read controller 2; write: APU frame counter"
-            :decode-read (fn [v] (str "button " (if (bit? v 0) "pressed" "not pressed")))}}))
+    ;; One address, two registers: reading it reads controller 2, but
+    ;; writing it goes to the sound chip's frame counter.
+    0x4017 {:name "JOY2" :about "Read controller 2, one button per read"
+            :decode-read (fn [v] (str "button " (if (bit? v 0) "pressed" "not pressed")))
+            :write-name "APU_FRAME"
+            :write-about "Sound: the frame counter, which paces the channels' volume envelopes and note lengths"
+            :decode-write (fn [v] (str (if (bit? v 7) "5-step" "4-step") " sequence"
+                                       (when (bit? v 6) ", no IRQ")))}}))
 
 (defn register-at
   "Info about the I/O register at CPU address `addr`, or nil if there isn't
   one: `:name`, `:about`, and maybe `:decode-read` / `:decode-write`
-  functions from a value to a description."
-  [addr]
-  (cond
-    (<= 0x2000 addr 0x3FFF) (nth ppu-registers (bit-and addr 7))
-    (<= 0x4000 addr 0x4017) (apu-io-registers addr)
-    (<= 0x8000 addr 0xFFFF) {:name "MAPPER"
-                             :about "Writing to ROM does nothing to the ROM, but a mapper chip on the cartridge can watch for these writes and switch banks"}
-    :else nil))
+  functions from a value to a description.
+
+  Some addresses are a different register when written ($4017: read for
+  controller 2, write for the sound chip's frame counter). Pass `write?`
+  true to get the register a write goes to."
+  ([addr] (register-at addr false))
+  ([addr write?]
+   (let [r (cond
+             (<= 0x2000 addr 0x3FFF) (nth ppu-registers (bit-and addr 7))
+             (<= 0x4000 addr 0x4017) (apu-io-registers addr)
+             (<= 0x8000 addr 0xFFFF) {:name "MAPPER"
+                                      :about "Writing to ROM does nothing to the ROM, but a mapper chip on the cartridge can watch for these writes and switch banks"}
+             :else nil)]
+     (if (and write? (:write-name r))
+       (assoc r :name (:write-name r) :about (:write-about r))
+       r))))
 
 (defn write-only?
   "True for registers that can only be written. Reading one gets 'open
@@ -98,7 +112,7 @@
     ;; Usually the 6502's 'dummy read': indexed stores like STA $4000,X
     ;; read the address once before writing to it.
     "write-only register: this read gets open bus (probably a 6502 dummy read)"
-    (when-let [{:keys [decode-read decode-write]} (register-at addr)]
+    (when-let [{:keys [decode-read decode-write]} (register-at addr write?)]
       (let [decode (if write? decode-write decode-read)]
         (when decode (decode value))))))
 
