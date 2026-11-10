@@ -110,6 +110,18 @@
     register accesses), `:accesses` (the most recent individual accesses)
     and `:dropped`."))
 
+(defprotocol CodeLog
+  "Recording which bytes of the program ROM run as code and which are read
+  as data, and where subroutines start. See nes.code-log."
+  (log-code! [emu on?]
+    "Start (true) or stop (false) recording. Stopping keeps what was
+    recorded; recording again adds to it.")
+  (clear-code-log! [emu] "Forget everything recorded.")
+  (code-log [emu]
+    "What's been recorded: {:flags :extra :calls :frames :header-size
+    :chr-size :recording?}, or nil if nothing has been. The arrays are live:
+    read them, don't change them."))
+
 (defprotocol Debug
   "Stopping the emulator when something happens. See nes.breakpoints."
   (set-breakpoints! [emu bps]

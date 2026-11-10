@@ -78,7 +78,7 @@ try {
   check(f1 - f0 > 30, `emulation runs (${f1 - f0} frames in 1 s)`);
 
   // Every tab renders without errors.
-  const tabs = ['Schematic', 'Cartridge', 'CPU', 'PPU', 'Memory', 'Lens', 'Tiles (CHR)',
+  const tabs = ['Schematic', 'Cartridge', 'CPU', 'PPU', 'Code', 'Memory', 'Lens', 'Tiles (CHR)',
                 'Sprites (OAM)', 'Background', 'Palettes'];
   for (const tab of tabs) {
     const before = errors.length;
@@ -106,6 +106,14 @@ try {
   check(stopped && pc === nmi, `breakpoint: stops at the NMI handler (${nmi}, PC ${pc})`);
   await page.click('button[title="Remove"]');
   await page.click('button:text-is("Continue")');
+
+  // The code/data log: record a second of play, and some subroutines turn up.
+  await page.click('button:text-is("Code")');
+  await page.click('button:text-is("● Record")');
+  await page.waitForTimeout(1500);
+  await page.click('button:text-is("■ Stop recording")');
+  const subs = await page.locator('h4:text("Subroutines") + table tbody tr').count();
+  check(subs > 2, `code log: finds subroutines (${subs} listed)`);
 
   // Editing a lens value: pause, set Concentration Room's tries-left to 42.
   await page.click('button:text-is("Pause")');

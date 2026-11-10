@@ -15,7 +15,11 @@
 
   What we can't see: jsnes draws the picture without going through its PPU
   memory-access code, so the PPU's own fetches of tiles and nametables
-  while drawing are ESTIMATED from whether rendering was switched on.")
+  while drawing are ESTIMATED from whether rendering was switched on.
+
+  The same wrappers also serve read/write breakpoints (`state.watch`) and
+  tell the code/data log (`state.codeLog`) when an NMI starts."
+  (:require [nes.emulator.jsnes-code-log :as code-log]))
 
 (def ring-size
   "How many of the most recent bus accesses to remember."
@@ -172,6 +176,7 @@
     (set! (.-doNonMaskableInterrupt cpu)
           (fn [status]
             (when-let [m (.-monitor state)] (bump! m "nmi" 1))
+            (when-let [l (.-codeLog state)] (code-log/nmi! l))
             (.call nmi cpu status)))
     (when mmap
       (let [mproto (.getPrototypeOf js/Object mmap)

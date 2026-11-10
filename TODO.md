@@ -84,9 +84,12 @@ recording what ran, found 40 and 97. Jump tables, data after `JSR`, and
 bank switching defeat static analysis; recording only sees what was
 played. So combine them.
 
-- [ ] **Code/data logger** – while switched on (like the bus monitor), record which PRG ROM
-  bytes ran as code and which were read as data, and every `JSR` with its target's ROM offset
-  (tracking the mapper's bank switches)
+- [x] **Code/data logger** – the Code tab (and `record-code!` / `code-summary` at the REPL):
+  code vs data per PRG ROM byte, instruction starts, `JSR` targets with call counts, jump-table
+  targets, NMI vs main loop; a map of the ROM; download in FCEUX's .cdl format
+- [ ] **Code/data logger follow-ups** – remember logs per ROM (they're lost on reload); CHR ROM
+  (which tiles get drawn); indirect data reads (`LDA ($nn),Y`); IRQ handlers; check the .cdl
+  file in FCEUX itself
 - [ ] **Routine discovery** – a pure function: logged entry points plus static traversal from
   them (and from the vectors) into a list of routines with their extent, calls and callers
 - [ ] **Routine metadata** – RAM read and written (static and observed); hardware touched,

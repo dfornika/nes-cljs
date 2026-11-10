@@ -22,6 +22,10 @@
 ;; loaded emulator gets the same setting.
 (defonce ^:private bus-monitor? (atom false))
 
+;; Whether to record the code/data log (see nes.code-log), likewise kept
+;; for ROMs loaded later.
+(defonce ^:private code-logging? (atom false))
+
 (defn emulator-instance
   "The current emulator, for poking at from the REPL."
   []
@@ -68,6 +72,21 @@
   (reset! bus-monitor? on?)
   (reset! last-sample-ms nil)
   (when-let [e @emulator] (emu/monitor-bus! e on?)))
+
+(defn log-code!
+  "Start or stop recording the code/data log, now and for ROMs loaded later."
+  [on?]
+  (reset! code-logging? on?)
+  (when-let [e @emulator] (emu/log-code! e on?))
+  (swap! db assoc :code-logging? on?))
+
+(defn clear-code-log! []
+  (when-let [e @emulator] (emu/clear-code-log! e)))
+
+(defn code-log
+  "The code/data log so far (see nes.emulator/code-log), or nil."
+  []
+  (some-> @emulator emu/code-log))
 
 (defn refresh-inspectors!
   ([] (refresh-inspectors! :tick))
@@ -354,6 +373,7 @@
         (emu/load-rom! e bytes)
         (emu/monitor-bus! e @bus-monitor?)
         (emu/set-breakpoints! e (breakpoints))
+        (emu/log-code! e @code-logging?)
         (reset! emulator e)
         (reset! bus-log [])
         (reset! bus-activity nil)

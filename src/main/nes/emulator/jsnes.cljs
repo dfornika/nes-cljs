@@ -13,6 +13,7 @@
   (:require ["jsnes" :refer [NES Controller]]
             [nes.breakpoints :as bp]
             [nes.emulator :as emu]
+            [nes.emulator.jsnes-code-log :as code-log]
             [nes.emulator.jsnes-monitor :as monitor]))
 
 (def ^:private button-codes
@@ -44,6 +45,7 @@
     (set! (.-scrollCaptured state) false)
     (set! (.-frames state) (inc (.-frames state)))
     (when-let [m (.-monitor state)] (monitor/frame-done! m ppu))
+    (when-let [l (.-codeLog state)] (code-log/frame! l))
     true))
 
 (defn- capture-scroll!
@@ -142,9 +144,12 @@
   not. (jsnes builds a new CPU, PPU and mapper on reset and ROM load, so
   this is also called then.)"
   [^js nes ^js state]
-  (if (or (.-monitor state) (.-watch state))
+  (if (or (.-monitor state) (.-watch state) (.-codeLog state))
     (monitor/install! nes state)
-    (monitor/uninstall! nes)))
+    (monitor/uninstall! nes))
+  (if-let [l (.-codeLog state)]
+    (code-log/install! l nes)
+    (code-log/uninstall! nes)))
 
 (defrecord JsnesEmulator [^js nes ^js state]
   emu/Emulator
@@ -329,6 +334,33 @@
     (when-let [m (.-monitor state)]
       (monitor/take! m)))
 
+  emu/CodeLog
+  (log-code! [_ on?]
+    (cond
+      (and on? (not (.-codeLog state)))
+      (do (set! (.-codeLog state) (or (.-codeLogKept state)
+                                      (code-log/create (* 16384 (.. nes -rom -romCount)))))
+          (reinstall-monitor! nes state))
+      (and (not on?) (.-codeLog state))
+      (do (set! (.-codeLogKept state) (.-codeLog state))
+          (set! (.-codeLog state) nil)
+          (reinstall-monitor! nes state))))
+  (clear-code-log! [_]
+    (set! (.-codeLogKept state) nil)
+    (when (.-codeLog state)
+      (set! (.-codeLog state) (code-log/create (* 16384 (.. nes -rom -romCount))))
+      (reinstall-monitor! nes state)))
+  (code-log [_]
+    (when-let [^js l (or (.-codeLog state) (.-codeLogKept state))]
+      (let [^js rom (.-rom nes)]
+        {:flags (.-flags l)
+         :extra (.-extra l)
+         :calls (.-calls l)
+         :frames (.-frames l)
+         :header-size (+ 16 (if (.-trainer rom) 512 0))
+         :chr-size (* 4096 (.-vromCount rom))
+         :recording? (some? (.-codeLog state))})))
+
   emu/Debug
   (set-breakpoints! [_ bps]
     (let [bps (vec bps)
@@ -354,4 +386,6 @@
         :scrollCaptured false :scrollX 0 :scrollY 0
         ;; breakpoints: see emu/Debug
         :bps [] :bpFlags nil :watch nil :hit nil :skipExec -1 :instrPc 0
-        :romFile nil}))
+        :romFile nil
+        ;; the code/data log while recording, and kept after stopping
+        :codeLog nil :codeLogKept nil}))

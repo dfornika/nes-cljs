@@ -39,6 +39,7 @@
   (:require [clojure.string :as str]
             [nes.console :as console]
             [nes.breakpoints :as bp]
+            [nes.code-log :as code-log]
             [nes.cpu.disasm :as disasm]
             [nes.emulator :as emu]
             [nes.lens :as lens]
@@ -339,6 +340,22 @@
   counting its 16-byte header) in the running game: a live ROM hack."
   [offset value]
   (console/write! [{:space :rom :addr offset :value value}]))
+
+(defn record-code!
+  "Start (or with false, stop) recording the code/data log: which ROM bytes
+  run as code, which are data, and where subroutines start. See the Code
+  tab, and `code-summary`."
+  ([] (record-code! true))
+  ([on?] (console/log-code! on?) on?))
+
+(defn code-summary
+  "What the code/data log has found so far: byte counts, and the `n`
+  (default 10) most-called subroutines."
+  ([] (code-summary 10))
+  ([n]
+   (when-let [log (console/code-log)]
+     (-> (code-log/summary log)
+         (update :routines #(vec (take n %)))))))
 
 (defn tap-snap!
   "Send a snapshot to `tap>` (for Portal or another data browser)."

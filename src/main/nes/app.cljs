@@ -7,6 +7,7 @@
             [nes.screen :as screen]
             [nes.background-view :refer [background-view]]
             [nes.breakpoints-view :refer [break-notice]]
+            [nes.code-log-view :refer [code-log-view]]
             [nes.cpu-view :refer [cpu-view]]
             [nes.drawer :refer [drawer]]
             [nes.input :as input]
@@ -266,6 +267,7 @@
    {:id :cartridge :label "Cartridge" :view rom-info}
    {:id :cpu :label "CPU" :view cpu-view}
    {:id :ppu :label "PPU" :view ppu-view}
+   {:id :code :label "Code" :view code-log-view}
    {:id :memory :label "Memory" :view memory-view}
    {:id :lens :label "Lens" :view lens-view}
    {:id :tiles :label "Tiles (CHR)" :view tiles-view}
