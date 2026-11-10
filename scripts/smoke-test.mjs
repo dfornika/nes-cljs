@@ -112,8 +112,10 @@ try {
   await page.click('button:text-is("● Record")');
   await page.waitForTimeout(1500);
   await page.click('button:text-is("■ Stop recording")');
-  const subs = await page.locator('h4:text("Subroutines") + table tbody tr').count();
-  check(subs > 2, `code log: finds subroutines (${subs} listed)`);
+  await page.click('button:text-is("Find routines")');
+  await page.waitForTimeout(500);
+  const subs = await page.locator('h4:text("Routines") + div table tbody tr').count();
+  check(subs > 5, `code log: finds routines (${subs} listed)`);
 
   // Editing a lens value: pause, set Concentration Room's tries-left to 42.
   await page.click('button:text-is("Pause")');
