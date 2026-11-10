@@ -108,6 +108,9 @@ played. So combine them.
 - [ ] **Recognizing routines by their behavior** – suggest names: writes `$4016` then reads it
   8 times → reads the controller; writes `$2007` in a loop → copies to video memory
 - [ ] **Our own games' compiler** emits code lenses, so the same tools debug them
+- [ ] **Annotation by homology** – the gene annotation idea: recognize a routine because it
+  resembles one already named in another game (shared sound drivers, libraries), by comparing
+  instruction sequences with the operands masked out, the way BLAST transfers gene names
 
 ## Playing games properly
 

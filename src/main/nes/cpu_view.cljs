@@ -1,10 +1,13 @@
 (ns nes.cpu-view
   "The CPU inspector: registers, status flags, the code about to run, and
   the stack."
-  (:require [nes.breakpoints-view :refer [breakpoints-panel]]
+  (:require [clojure.string :as str]
+            [nes.breakpoints-view :refer [breakpoints-panel]]
             [nes.console :as console]
             [nes.cpu.disasm :as disasm :refer [hex]]
             [nes.cpu.opcodes :as ops]
+            [nes.cpu.reference :as ref]
+            [nes.instructions-view :as instructions-view]
             [nes.emulator :as emu]
             [nes.state :refer [db]]))
 
@@ -62,13 +65,26 @@
 ;; ---------------------------------------------------------------------------
 ;; Disassembly
 
-(defn- code-listing [emulator pc]
+(defn- mnemonic-link
+  "An instruction's assembly text, with its mnemonic linking to the
+  Instructions tab."
+  [{:keys [mnemonic] :as instr}]
+  (if-not mnemonic
+    [:span (disasm/text instr)]
+    [:span
+     [:a {:href "#" :title (str (get-in ref/instructions [mnemonic :name]) ": click for details")
+          :style {:color "#24292f" :text-decoration "underline dotted #8c959f"}
+          :on-click (fn [e] (.preventDefault e) (instructions-view/show! mnemonic))}
+      (str/upper-case (name mnemonic))]
+     (let [o (disasm/operand-text instr)] (when (seq o) (str " " o)))]))
+
+(defn- code-listing [emulator pc regs]
   (let [peek #(emu/cpu-peek emulator %)
         instrs (disasm/disassemble peek pc 16)
         exec-bps (into {} (for [b (console/breakpoints)
                                 :when (and (= :exec (:kind b)) (nil? (:end b)))]
                             [(:addr b) b]))]
-    [:table {:style (merge mono {:border-collapse "collapse" :font-size "13px"})}
+    [:table {:style {:border-collapse "collapse" :font-size "13px"}}
      [:tbody
       (for [[i {:keys [addr bytes mnemonic mode] :as instr}] (map-indexed vector instrs)]
         ^{:key i}
@@ -80,44 +96,95 @@
                  :on-click #(console/toggle-exec-breakpoint! addr)}
             "●"])
          [:td {:style {:padding "1px 6px 1px 2px" :width "14px"}} (when (zero? i) "▶")]
-         [:td {:style {:padding "1px 6px" :color "#0969da"}} (subs (hex addr 4) 1)]
-         [:td {:style (merge muted {:padding "1px 6px" :white-space "pre"})}
+         [:td {:style (merge mono {:padding "1px 6px" :color "#0969da"})} (subs (hex addr 4) 1)]
+         [:td {:style (merge mono muted {:padding "1px 6px" :white-space "pre"})}
           (.padEnd (apply str (interpose " " (map #(if % (subs (hex % 2) 1) "??") bytes))) 8)]
-         [:td {:style {:padding "1px 6px" :white-space "pre"}
-               :title (when mnemonic (get-in ops/modes [mode :name]))}
-          (disasm/text instr)]])]]))
+         [:td {:style (merge mono {:padding "1px 6px" :white-space "pre"})
+               :title (when mnemonic (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)))}
+          [mnemonic-link instr]]
+         [:td {:style {:padding "1px 6px" :color (if (zero? i) "#24292f" "#57606a")
+                       :font-size "12px"}}
+          ;; the instruction about to run, with the actual addresses and values
+          (ref/explain instr (when (zero? i) {:regs regs :peek peek}))]])]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Stack and vectors
 
+(defn- return-address
+  "If the two bytes at `a` (low) and `a`+1 (high) look like an address
+  pushed by JSR, where it returns to and the JSR's own address."
+  [emulator a]
+  (let [lo (emu/cpu-peek emulator a)
+        hi (emu/cpu-peek emulator (inc a))]
+    (when (and lo hi)
+      (let [v (bit-or lo (bit-shift-left hi 8))
+            jsr-at (- v 2)]
+        ;; JSR pushes the address of its own last byte: the JSR is 2 before
+        (when (and (>= jsr-at 0x8000) (= 0x20 (emu/cpu-peek emulator jsr-at)))
+          {:returns-to (inc v) :jsr-at jsr-at
+           :target (bit-or (emu/cpu-peek emulator (inc jsr-at))
+                           (bit-shift-left (emu/cpu-peek emulator (+ 2 jsr-at)) 8))})))))
+
 (defn- stack-view [emulator sp]
-  (let [entries (for [a (range (+ 0x101 sp) 0x200)] [a (emu/cpu-peek emulator a)])]
-    (if (empty? entries)
-      [:div {:style muted} "(empty)"]
-      [:div {:style (merge mono {:font-size "13px" :display "flex" :flex-wrap "wrap" :gap "2px 10px"})}
-       (for [[a v] (take 16 entries)]
-         ^{:key a} [:span [:span {:style muted} (subs (hex a 4) 1) ":"] (subs (hex v 2) 1)])
-       (when (> (count entries) 16) [:span {:style muted} "…"])])))
+  (let [top (+ 0x101 sp)]
+    (if (> top 0x1FF)
+      [:div {:style muted} "Empty."]
+      [:div
+       [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px" :max-width "340px"})}
+        "The stack is RAM at $0100-$01FF, filled from the top down: JSR saves where to come back to "
+        "here (2 bytes), and PHA saves A. Newest first:"]
+       [:table {:style {:font-size "13px" :border-collapse "collapse"}}
+        [:tbody
+         (loop [a top rows [] n 0]
+           (if (or (> a 0x1FF) (= n 12))
+             (seq (cond-> rows (<= a 0x1FF) (conj ^{:key "more"} [:tr [:td {:style muted} "…"]])))
+             (if-let [{:keys [returns-to jsr-at target]} (when (< a 0x1FF) (return-address emulator a))]
+               (recur (+ a 2)
+                      (conj rows
+                            ^{:key a}
+                            [:tr
+                             [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1) "–" (subs (hex (inc a) 4) 3)]
+                             [:td {:style (merge mono {:padding "1px 8px 1px 0"})}
+                              (subs (hex (emu/cpu-peek emulator a) 2) 1) " " (subs (hex (emu/cpu-peek emulator (inc a)) 2) 1)]
+                             [:td {:style {:font-size "12px"}}
+                              "return address: back to " [:span {:style mono} (hex returns-to 4)]
+                              [:span {:style muted} " (after the call to " (hex target 4) " at " (hex jsr-at 4) ")"]]])
+                      (inc n))
+               (recur (inc a)
+                      (conj rows
+                            ^{:key a}
+                            [:tr
+                             [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1)]
+                             [:td {:style (merge mono {:padding "1px 8px 1px 0"})} (subs (hex (emu/cpu-peek emulator a) 2) 1)]
+                             [:td]])
+                      (inc n)))))]]])))
 
 (defn- word-at [emulator addr]
   (let [lo (emu/cpu-peek emulator addr) hi (emu/cpu-peek emulator (inc addr))]
     (when (and lo hi) (bit-or lo (bit-shift-left hi 8)))))
 
 (def ^:private vectors
-  [[0xFFFA "NMI" "Where the CPU jumps each time the PPU starts vertical blank (if enabled)"]
-   [0xFFFC "RESET" "Where the CPU starts running at power on and reset"]
-   [0xFFFE "IRQ/BRK" "Where the CPU jumps on an IRQ interrupt or BRK instruction"]])
+  [[0xFFFA "NMI" "Runs every frame, when the PPU finishes the picture (if PPUCTRL turns it on). Games update the screen here."]
+   [0xFFFC "RESET" "Where the game starts, at power on and when Reset is pressed."]
+   [0xFFFE "IRQ/BRK" "For interrupts from the cartridge or sound chip, and the BRK instruction. Many games don't use it."]])
 
 (defn- vector-table [emulator]
-  [:table {:style (merge mono {:font-size "13px"})}
-   [:tbody
-    (for [[addr label title] vectors]
-      ^{:key addr}
-      [:tr {:title title}
-       [:td {:style {:padding-right "10px"}} label]
-       [:td {:style muted} (hex addr 4)]
-       [:td {:style {:padding "0 6px"}} "→"]
-       [:td (some-> (word-at emulator addr) (hex 4))]])]])
+  [:div
+   [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px" :max-width "340px"})}
+    "The last 6 bytes of ROM hold three addresses: where the CPU goes when something happens."]
+   [:table {:style {:font-size "13px" :border-collapse "collapse"}}
+    [:tbody
+     (for [[addr label about] vectors
+           :let [target (word-at emulator addr)]]
+       ^{:key addr}
+       [:tr {:style {:vertical-align "top"}}
+        [:td {:style {:padding "2px 8px 2px 0" :font-weight "bold"}} label]
+        [:td {:style (merge mono {:padding "2px 8px 2px 0" :white-space "nowrap"})}
+         (some-> target (hex 4))
+         (when target
+           [:button {:title "Stop when this runs" :style {:font-size "10px" :margin-left "4px"}
+                     :on-click #(console/add-breakpoint! {:kind :exec :addr target})} "●"])]
+        [:td {:style (merge muted {:padding "2px 0" :font-size "12px" :max-width "240px"})} about]])]]])
 
 ;; ---------------------------------------------------------------------------
 
@@ -138,19 +205,23 @@
            ^{:key k} [register-box label (regs k) width title])
          [:div {:style {:margin-left "8px"}}
           [:div {:style (merge muted {:font-size "11px" :margin-bottom "2px"})}
-           "Status (P) = " (hex p 2)]
-          [flag-boxes p]]]]
+           "Status flags (P) = " (hex p 2)]
+          [flag-boxes p]
+          [:div {:style (merge muted {:font-size "11px" :margin-top "2px" :max-width "260px"})}
+           (let [on (for [[i [label about]] (map-indexed vector flags)
+                          :when (and (bit-test p (- 7 i)) (not= label "-"))]
+                      (str label " " (first (.split about ":"))))]
+             (if (seq on) (str "Set: " (str/join ", " on)) "None set"))]]]]
        [:div {:style (merge muted mono {:font-size "12px" :margin "-8px 0 16px"})}
         "Frame " frame " · scanline " scanline " · dot " dot " · CPU cycle " cycles
         (when (<= 241 scanline 260) " · in vertical blank")]
        [:div {:style {:display "flex" :gap "32px" :flex-wrap "wrap"}}
-        [section "Next instructions" [code-listing emulator pc]
-         [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
-          "Click a ● to stop there."]]
+        [section "Next instructions"
+         [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px"})}
+          "The highlighted one runs next. Click an instruction's name for what it does, or a ● to stop there."]
+         [code-listing emulator pc regs]]
         [:div
-         [section "Stack" [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px"})}
-                           "Most recently pushed first"]
-          [stack-view emulator sp]]
+         [section "Stack" [stack-view emulator sp]]
          [section "Interrupt vectors" [vector-table emulator]]]]
        [section "Breakpoints" [breakpoints-panel]]])
     [:p {:style muted} "Load a ROM to see the CPU."]))

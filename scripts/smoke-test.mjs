@@ -78,7 +78,7 @@ try {
   check(f1 - f0 > 30, `emulation runs (${f1 - f0} frames in 1 s)`);
 
   // Every tab renders without errors.
-  const tabs = ['Schematic', 'Cartridge', 'CPU', 'PPU', 'Code', 'Memory', 'Lens', 'Tiles (CHR)',
+  const tabs = ['Schematic', 'Cartridge', 'CPU', 'PPU', 'Code', 'Instructions', 'Memory', 'Lens', 'Tiles (CHR)',
                 'Sprites (OAM)', 'Background', 'Palettes'];
   for (const tab of tabs) {
     const before = errors.length;
@@ -97,7 +97,7 @@ try {
 
   // Breakpoints: stop at the start of the NMI handler, which runs every frame.
   await page.click('button:text-is("CPU")');
-  const nmi = (await page.locator('tr[title^="Where the CPU jumps each time"] td').nth(3).textContent()).trim();
+  const nmi = (await page.locator('tr:has(td:text-is("NMI")) td').nth(1).textContent()).match(/\$[0-9A-F]{4}/)[0];
   await page.selectOption('form select', 'exec');
   await page.fill('form input[placeholder="$addr"]', nmi);
   await page.click('form button:text-is("Add")');

@@ -35,23 +35,35 @@
 (defn- swatches [colors]
   [:span {:style {:display "inline-flex" :border "1px solid #8c959f"}}
    (for [[i c] (map-indexed vector colors)]
-     ^{:key i} [:span {:style {:width "12px" :height "12px" :background (chr/bgr->css c)}}])])
+     ^{:key i} [:span {:style {:width "16px" :height "16px" :background (chr/bgr->css c)}}])])
 
-(defn- palette-picker [emulator]
+(defn- palette-picker
+  "Which colors to draw the tiles in: gray, or one of the eight palettes
+  the game has set up (four for the background, four for sprites), in
+  two columns."
+  [emulator]
   (let [current (:palette @view)
         option (fn [p label]
-                 [:label {:key (str p)
-                          :style {:display "inline-flex" :align-items "center" :gap "4px"
-                                  :padding "2px 6px" :border-radius "4px" :cursor "pointer"
-                                  :background (when (= p current) "#ddf4ff")}}
-                  [:input {:type "radio" :name "chr-palette" :checked (= p current)
-                           :on-change #(swap! view assoc :palette p)}]
-                  label [swatches (colors-for emulator p)]])]
-    [:div {:style {:display "flex" :flex-wrap "wrap" :gap "4px" :align-items "center"}}
-     [:span {:style {:margin-right "4px"}} "Colors:"]
-     (option :gray "Gray")
-     (for [p (range 4)] (option p (str "BG " p)))
-     (for [p (range 4 8)] (option p (str "Sprite " (- p 4))))]))
+                 [:button {:key (str p)
+                           :on-click #(swap! view assoc :palette p)
+                           :title (if (= p :gray) "Plain gray, to see the 4 color numbers"
+                                      (str "Draw the tiles with " label ", as the game has it set up now"))
+                           :style {:display "flex" :align-items "center" :gap "8px" :justify-content "space-between"
+                                   :padding "3px 8px" :border-radius "4px" :cursor "pointer" :font-size "13px"
+                                   :border (if (= p current) "2px solid #0969da" "1px solid #d0d7de")
+                                   :background (if (= p current) "#ddf4ff" "white")}}
+                  [:span label] [swatches (colors-for emulator p)]])]
+    [:div {:style {:display "grid" :grid-template-columns "auto auto auto" :gap "4px 10px"
+                   :align-items "center" :width "fit-content"}}
+     [:span {:style {:color "#57606a" :font-size "13px"}} "Colors"]
+     [:span {:style {:color "#57606a" :font-size "12px"}} "Background palettes"]
+     [:span {:style {:color "#57606a" :font-size "12px"}} "Sprite palettes"]
+     (for [row (range 4)]
+       ^{:key row}
+       [:<>
+        (if (zero? row) (option :gray "Gray") [:span])
+        (option row (str "Background " row))
+        (option (+ 4 row) (str "Sprite " row))])]))
 
 ;; ---------------------------------------------------------------------------
 ;; Pattern tables
