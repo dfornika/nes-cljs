@@ -73,3 +73,11 @@ jobs:
 
       - name: Smoke test
         run: npm run smoke
+
+      # If it failed, keep the screenshots of the steps that failed
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-failures
+          path: smoke-failures/
+          if-no-files-found: ignore
