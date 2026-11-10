@@ -3,9 +3,8 @@
   CPU's registers and cycle count before every instruction with the
   reference log from a known-good emulator (Nintendulator).
 
-  nestest isn't in this repository. Point NESTEST_DIR at a folder with
-  nestest.nes and nestest.log, or the test looks in a couple of likely
-  places, and is skipped if it can't find them."
+  nestest is in test-roms/nestest (see the README there). NESTEST_DIR can
+  point somewhere else."
   (:require [cljs.test :refer [deftest is]]
             [nes.cpu.core :as cpu]))
 
@@ -17,7 +16,6 @@
                     (.existsSync fs (.join path % "nestest.log")))
            %)
         [(.. js/process -env -NESTEST_DIR)
-         "../nescore/public/testroms"
          "test-roms/nestest"]))
 
 (defn- parse-line
@@ -36,7 +34,6 @@
           expected (->> (.split (str (.readFileSync fs (.join path dir "nestest.log"))) "\n")
                         (remove #(< (count %) 20))
                         (map parse-line)
-                        (take-while (complement :unofficial?))
                         vec)
           mem (js/Uint8Array. 0x10000)
           bus (cpu/flat-bus mem)
@@ -58,5 +55,6 @@
         (is (nil? mismatch) (str "differs from nestest.log: " (pr-str mismatch)))
         ;; nestest's own verdict: an error code at $02 and $03, 0 if all passed
         (is (= [0 0] [(aget mem 2) (aget mem 3)]) "nestest reports no errors")
-        (is (= 5003 (count expected)) "all the official-instruction lines were compared")))
-    (println "nestest not found; skipping (set NESTEST_DIR)")))
+        (is (= 8991 (count expected)) "every line was compared")
+        (is (= 197 (count (filter :unofficial? expected))) "including the unofficial instructions")))
+    (is false "nestest not found in test-roms/nestest (or NESTEST_DIR)")))

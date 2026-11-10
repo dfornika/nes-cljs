@@ -132,15 +132,15 @@ played. So combine them.
 - [x] **6502 CPU in ClojureScript** – `nes.cpu.core`: the 151 official instructions, with
   cycle counts and jsnes's exact bus accesses; swappable for jsnes's CPU inside the jsnes
   emulator (CPU tab, `emu/use-cpu!`). jsnes still takes interrupts and unofficial opcodes
-- [x] **Validate against `nestest.nes`** – all 5,003 official-instruction lines of its log
-  match (registers, flags, cycles). The test is skipped where nestest isn't present (CI)
+- [x] **Validate against `nestest.nes`** – every line of its log matches (registers, flags,
+  cycles), official and unofficial instructions
 - [x] **Side-by-side check** – the CPU tab's Compare runs both CPUs for 600 frames and checks
   picture and RAM every frame: identical on all the games tried
-- [ ] **nestest in CI** – the ROM and log aren't in the repo (no clear license); fetch them in
-  CI, or add them with a note
-- [ ] **Interrupts in ClojureScript** – take NMI and IRQ in `nes.cpu.core` too, matching
-  jsnes's timing (when an NMI raised mid-instruction takes effect)
-- [ ] **Unofficial opcodes** in the opcode table, disassembler and `nes.cpu.core`
+- [x] **nestest in CI** – vendored in `test-roms/nestest`, as nescore does
+- [x] **Interrupts in ClojureScript** – NMI, IRQ and RESET in `nes.cpu.core`, following jsnes's
+  timing rules; jsnes now runs nothing but the 12 opcodes that jam the CPU
+- [x] **Unofficial opcodes** – all 93, in the opcode table (`*` in the disassembly), the
+  Instructions tab and `nes.cpu.core`; nestest's whole log (8,991 lines) matches
 - [ ] **Faster core** – the step function allocates closures per instruction; whole frames
   run 1.0–1.2× jsnes's time now
 - [ ] **A ClojureScript PPU**, then a whole console behind the `Emulator` protocol

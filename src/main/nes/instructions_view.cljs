@@ -33,7 +33,7 @@
                     :background "#f6f8fa"}}
      name " " [:span {:style (merge muted mono)} (subs (hex op 2) 1)]]))
 
-(defn- instruction-row [m {:keys [name does flags about]} focused?]
+(defn- instruction-row [m {:keys [name does flags about]} focused? modes]
   (let [bg (when focused? "#fff8c5")]
     [:<>
      [:tr {:ref (fn [el]
@@ -52,7 +52,7 @@
       [:td]
       [:td {:col-span 3 :style {:padding "2px 0 6px"}}
        (when about [:div {:style (merge muted {:font-size "12px" :margin-bottom "3px"})} about])
-       [:div (for [[mode op] (ref/modes-of m)] ^{:key op} [mode-chip mode op])]]]]))
+       [:div (for [[mode op] modes] ^{:key op} [mode-chip mode op])]]]]))
 
 (defn- modes-table []
   [:table {:style {:border-collapse "collapse" :font-size "13px"}}
@@ -90,7 +90,26 @@
         [:table {:style {:border-collapse "collapse" :width "100%"}}
          [:tbody
           (for [[m info] rows]
-            ^{:key m} [instruction-row m info (= m instruction-focus)])]]])
+            ^{:key m} [instruction-row m info (= m instruction-focus) (ref/modes-of m)])]]])
+     (let [rows (filter #(matches? query %) (sort-by key ref/unofficial-instructions))
+           extra (filter #(matches? query %) [[:nop {:name "No operation (unofficial)" :does "nothing"
+                                                     :flags "" :about "Some read their address anyway."}]
+                                              [:sbc {:name "Subtract with borrow (unofficial)"
+                                                     :does "A = A - M - (1 - C)" :flags "N V Z C"
+                                                     :about "The same as the official $E9."}]])]
+       (when (or (seq rows) (seq extra))
+         [:div {:style {:margin-bottom "12px"}}
+          [:h4 {:style {:margin "8px 0 2px"}} "Unofficial"]
+          [:div {:style (merge muted {:font-size "13px" :margin-bottom "4px"})}
+           "105 of the 256 opcode bytes were never documented, but still do something: "
+           "the chip's decoding logic mixes parts of neighbouring instructions. Most combine two "
+           "official instructions. A few games use them; the disassembly marks them with a *. "
+           "12 more (not shown) jam the CPU."]
+          [:table {:style {:border-collapse "collapse" :width "100%"}}
+           [:tbody
+            (for [[m info] (concat rows extra)]
+              ^{:key (str "u" (cljs.core/name m))}
+              [instruction-row m info (= m instruction-focus) (ref/modes-of m true)])]]]))
      [:h4 {:style {:margin "16px 0 4px"}} "Addressing modes"]
      [:p {:style (merge muted {:margin "0 0 6px" :font-size "13px"})}
       "Where an instruction's operand comes from. The size is the whole instruction: "

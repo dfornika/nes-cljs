@@ -112,6 +112,35 @@
 
    :nop {:name "No operation" :category :other :does "nothing" :flags ""}})
 
+(def unofficial-instructions
+  "The unofficial instructions (see nes.cpu.opcodes): mnemonic -> {:name
+  :does :flags :about}. NOP and SBC have unofficial opcodes too, but are
+  described above."
+  {:lax {:name "Load A and X" :does "A = X = M" :flags "N Z"}
+   :sax {:name "Store A AND X" :does "M = A AND X" :flags ""}
+   :dcp {:name "Decrement, then compare" :does "M = M - 1; flags from A - M" :flags "N Z C"
+         :about "DEC then CMP, in one instruction."}
+   :isb {:name "Increment, then subtract" :does "M = M + 1; A = A - M - (1 - C)" :flags "N V Z C"
+         :about "INC then SBC. Also called ISC."}
+   :slo {:name "Shift left, then OR" :does "M = M << 1; A = A OR M" :flags "N Z C"}
+   :rla {:name "Rotate left, then AND" :does "M = rotate left M; A = A AND M" :flags "N Z C"}
+   :sre {:name "Shift right, then XOR" :does "M = M >> 1; A = A XOR M" :flags "N Z C"}
+   :rra {:name "Rotate right, then add" :does "M = rotate right M; A = A + M + C" :flags "N V Z C"}
+   :anc {:name "AND, carry = bit 7" :does "A = A AND M; C = N" :flags "N Z C"}
+   :alr {:name "AND, then shift right" :does "A = (A AND M) >> 1" :flags "N Z C" :about "Also called ASR."}
+   :arr {:name "AND, then rotate right" :does "A = rotate right (A AND M)" :flags "N V Z C"
+         :about "With odd effects on C and V."}
+   :axs {:name "X = (A AND X) - M" :does "X = (A AND X) - M" :flags "N Z C" :about "Also called SBX."}
+   :las {:name "Load A, X and SP" :does "A = X = SP = M AND SP" :flags "N Z"}
+   :xaa {:name "A = X AND M (unstable)" :does "A = (A OR magic) AND X AND M" :flags "N Z"
+         :about "Unpredictable on real chips: depends on the chip, even its temperature."}
+   :lxa {:name "Load A and X (unstable)" :does "A = X = (A OR magic) AND M" :flags "N Z"
+         :about "Unpredictable on real chips."}
+   :sha {:name "Store A AND X AND H (unstable)" :does "M = A AND X AND (high byte of address + 1)" :flags ""}
+   :shx {:name "Store X AND H (unstable)" :does "M = X AND (high byte of address + 1)" :flags ""}
+   :shy {:name "Store Y AND H (unstable)" :does "M = Y AND (high byte of address + 1)" :flags ""}
+   :tas {:name "SP = A AND X, then store (unstable)" :does "SP = A AND X; M = SP AND (high byte + 1)" :flags ""}})
+
 (def mode-notes
   "Addressing modes in plain English: where the instruction's operand is."
   {:imp "No operand: the instruction says it all."
@@ -130,9 +159,12 @@
 
 (defn modes-of
   "The addressing modes `mnemonic` comes in, with their opcode bytes:
-  [[mode opcode] ...]."
-  [mnemonic]
-  (sort-by second (for [[op {m :mnemonic mode :mode}] ops/opcodes :when (= m mnemonic)] [mode op])))
+  [[mode opcode] ...]. With `unofficial?`, the unofficial opcodes."
+  ([mnemonic] (modes-of mnemonic false))
+  ([mnemonic unofficial?]
+   (sort-by second (for [[op {m :mnemonic mode :mode}] (if unofficial? ops/unofficial-opcodes ops/opcodes)
+                         :when (= m mnemonic)]
+                     [mode op]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Explaining one instruction
@@ -209,11 +241,21 @@
   instruction about to run, to include the actual addresses, values and
   whether a branch will be taken."
   ([ins] (explain ins nil))
-  ([{:keys [mnemonic mode operand target] :as ins} now]
+  ([{:keys [mnemonic mode operand target unofficial?] :as ins} now]
    (let [o #(operand-words ins now)
          to (fn [verb] (str verb " " (o)))]
-     (if-not mnemonic
-       "Not an instruction (probably data)"
+     (cond
+       (not mnemonic)
+       "Jams the CPU (or it's data, not code)"
+
+       (and unofficial? (= mnemonic :nop))
+       (str "Unofficial: does nothing" (when (#{:zp :zpx :abs :abx} mode) (str " (but reads " (o) ")")))
+
+       (and unofficial? (not= mnemonic :sbc))
+       (str "Unofficial: " (get-in unofficial-instructions [mnemonic :name])
+            (when-not (#{:imp :acc} mode) (str ", " (o))))
+
+       :else
        (case mnemonic
          :lda (str "Load A with " (o))
          :ldx (str "Load X with " (o))
@@ -222,7 +264,7 @@
          :stx (str "Store X into " (o))
          :sty (str "Store Y into " (o))
          (:tax :tay :txa :tya :tsx :txs :pha :php :pla :plp :clc :sec :cli :sei :clv :cld :sed :nop :rts :rti :brk
-          :inx :iny :dex :dey)
+               :inx :iny :dex :dey)
          (get-in instructions [mnemonic :name])
          :adc (to "Add (with carry) to A:")
          :sbc (to "Subtract (with borrow) from A:")

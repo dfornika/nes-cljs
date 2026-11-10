@@ -85,3 +85,53 @@
 (def opcode-for
   "[mnemonic mode] -> opcode byte. The reverse of `opcodes`, for assembling."
   (into {} (for [[op {:keys [mnemonic mode]}] opcodes] [[mnemonic mode] op])))
+
+;; ---------------------------------------------------------------------------
+;; Unofficial opcodes
+;;
+;; The other 105 byte values weren't documented by the 6502's makers, but
+;; they still do something: the chip's decoding logic combines parts of
+;; neighbouring instructions. Most are combinations of two official
+;; instructions (DCP = DEC then CMP; LAX = LDA and LDX at once) or NOPs
+;; with extra addressing modes. A few games and many demos use them. 12 of
+;; them (the 'JAM' or 'KIL' opcodes) lock the CPU up; they aren't here.
+;;
+;; Names as on https://www.nesdev.org/wiki/CPU_unofficial_opcodes (and in
+;; nestest's log); behaviour as jsnes implements it.
+
+(def ^:private unofficial-by-mnemonic
+  {:nop (map vector [:imp :imp :imp :imp :imp :imp :imm :imm :imm :imm :imm
+                     :abs :abx :abx :abx :abx :abx :abx :zp :zp :zp :zpx :zpx :zpx :zpx :zpx :zpx]
+             [0x1A 0x3A 0x5A 0x7A 0xDA 0xFA 0x80 0x82 0x89 0xC2 0xE2
+              0x0C 0x1C 0x3C 0x5C 0x7C 0xDC 0xFC 0x04 0x44 0x64 0x14 0x34 0x54 0x74 0xD4 0xF4])
+   :sbc [[:imm 0xEB]]
+   :alr [[:imm 0x4B]]
+   :anc [[:imm 0x0B] [:imm 0x2B]]
+   :arr [[:imm 0x6B]]
+   :axs [[:imm 0xCB]]
+   :lax (map vector [:izx :zp :abs :izy :zpy :aby] [0xA3 0xA7 0xAF 0xB3 0xB7 0xBF])
+   :sax (map vector [:izx :zp :abs :zpy] [0x83 0x87 0x8F 0x97])
+   :dcp (map vector [:izx :zp :abs :izy :zpx :aby :abx] [0xC3 0xC7 0xCF 0xD3 0xD7 0xDB 0xDF])
+   :isb (map vector [:izx :zp :abs :izy :zpx :aby :abx] [0xE3 0xE7 0xEF 0xF3 0xF7 0xFB 0xFF])
+   :slo (map vector [:izx :zp :abs :izy :zpx :aby :abx] [0x03 0x07 0x0F 0x13 0x17 0x1B 0x1F])
+   :rla (map vector [:izx :zp :abs :izy :zpx :aby :abx] [0x23 0x27 0x2F 0x33 0x37 0x3B 0x3F])
+   :sre (map vector [:izx :zp :abs :izy :zpx :aby :abx] [0x43 0x47 0x4F 0x53 0x57 0x5B 0x5F])
+   :rra (map vector [:izx :zp :abs :izy :zpx :aby :abx] [0x63 0x67 0x6F 0x73 0x77 0x7B 0x7F])
+   :sha [[:izy 0x93] [:aby 0x9F]]
+   :tas [[:aby 0x9B]]
+   :shy [[:abx 0x9C]]
+   :shx [[:aby 0x9E]]
+   :las [[:aby 0xBB]]
+   :xaa [[:imm 0x8B]]
+   :lxa [[:imm 0xAB]]})
+
+(def unofficial-opcodes
+  "opcode byte -> {:mnemonic :mode :size :unofficial? true}"
+  (into {}
+        (for [[mnemonic entries] unofficial-by-mnemonic
+              [mode opcode] entries]
+          [opcode {:mnemonic mnemonic :mode mode :size (get-in modes [mode :size]) :unofficial? true}])))
+
+(def all-opcodes
+  "Official and unofficial opcodes together: 244 of the 256 bytes."
+  (merge opcodes unofficial-opcodes))

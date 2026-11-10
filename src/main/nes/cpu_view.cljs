@@ -211,10 +211,11 @@
       [option :cljs "NES.cljs's own 6502 (ClojureScript)"]]
      [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
       (if (= which :cljs)
-        [:span "nes.cpu.core runs each instruction; the PPU, sound and cartridge are still jsnes's. "
-         "jsnes still takes interrupts and the few unofficial instructions some games use. So far: "
-         [:span {:style mono} cljs] " instructions by ClojureScript, "
-         [:span {:style mono} jsnes] " by jsnes."]
+        [:span "nes.cpu.core runs every instruction and interrupt (official and unofficial); "
+         "the PPU, sound and cartridge are still jsnes's. So far: "
+         [:span {:style mono} cljs] " instructions and interrupts by ClojureScript"
+         (when (pos? jsnes) [:span ", " [:span {:style mono} jsnes] " by jsnes (opcodes that jam the CPU)"])
+         "."]
         "The rest of the console (PPU, sound, cartridge) is jsnes either way. You can switch while a game runs.")]
      [:div {:style {:margin-top "6px" :display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
       [:button {:disabled running? :on-click #(console/compare-cpus! 600)
@@ -226,8 +227,9 @@
                   " picture and RAM for all " same-for " frames. Time: jsnes "
                   (js/Math.round jsnes-ms) " ms, ClojureScript " (js/Math.round cljs-ms) " ms ("
                   (.toFixed (/ cljs-ms (max jsnes-ms 1)) 1) "×)."
-                  (when stats [:span {:style muted} " ClojureScript ran " (:cljs stats) " instructions, jsnes "
-                               (:jsnes stats) " (interrupts and unofficial ones)."])]
+                  (when stats [:span {:style muted} " ClojureScript ran " (:cljs stats) " instructions and interrupts"
+                               (when (pos? (:jsnes stats)) (str ", jsnes " (:jsnes stats)))
+                               "."])]
         differs-at [:span {:style {:color "#cf222e" :font-weight "bold"}}
                     "✗ they differ from frame " differs-at])]]))
 

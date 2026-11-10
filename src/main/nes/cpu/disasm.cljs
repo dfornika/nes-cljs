@@ -17,10 +17,11 @@
 
   Returns a map with `:addr`, `:bytes`, `:size`, `:mnemonic`, `:mode`,
   `:operand` (the 8- or 16-bit operand, if any) and, for branches,
-  `:target`. Unknown opcodes come back with `:mnemonic nil` and size 1."
+  `:target`, and `:unofficial? true` for unofficial opcodes. The 12 that
+  jam the CPU come back with `:mnemonic nil` and size 1."
   [peek addr]
   (let [op (peek addr)
-        {:keys [mnemonic mode size] :as info} (when op (ops/opcodes op))]
+        {:keys [mnemonic mode size] :as info} (when op (ops/all-opcodes op))]
     (if-not info
       {:addr addr :size 1 :bytes [op] :mnemonic nil}
       (let [bytes (mapv #(peek (bit-and 0xFFFF (+ addr %))) (range size))
@@ -31,6 +32,7 @@
                       3 (when (and lo hi) (bit-or lo (bit-shift-left hi 8))))]
         (cond-> {:addr addr :bytes bytes :size size
                  :mnemonic mnemonic :mode mode :operand operand}
+          (:unofficial? info) (assoc :unofficial? true)
           (and (= mode :rel) lo)
           (assoc :target (bit-and 0xFFFF (+ addr 2 (signed-byte lo)))))))))
 
@@ -55,10 +57,11 @@
       :rel (if target (hex target 4) "??"))))
 
 (defn text
-  "One decoded instruction as assembly text, like \"LDA #$01\"."
-  [{:keys [mnemonic bytes] :as instr}]
+  "One decoded instruction as assembly text, like \"LDA #$01\". Unofficial
+  ones get a * in front, as in nestest's log: \"*LAX $40\"."
+  [{:keys [mnemonic bytes unofficial?] :as instr}]
   (if mnemonic
-    (str/trimr (str (str/upper-case (name mnemonic)) " " (operand-text instr)))
+    (str/trimr (str (when unofficial? "*") (str/upper-case (name mnemonic)) " " (operand-text instr)))
     (str ".byte " (if-let [b (first bytes)] (hex b 2) "??"))))
 
 (defn disassemble

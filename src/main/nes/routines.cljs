@@ -159,8 +159,12 @@
                       entries)]
         (if (or (contains? seen off) (logged-data? ctx off))
           (recur todo seen entries)
-          (let [{:keys [mnemonic size] :as ins} (decode-at ctx off r)]
-            (if-not mnemonic
+          (let [{:keys [mnemonic size unofficial?] :as ins} (decode-at ctx off r)]
+            ;; Data often decodes as unofficial opcodes, so following the
+            ;; code stops at one, unless the log saw it run.
+            (if (or (not mnemonic)
+                    (and unofficial?
+                         (not (and (:flags ctx) (pos? (bit-and (aget (:flags ctx) off) cl/flag-code))))))
               (recur todo seen entries)
               (let [seen (assoc! seen off ins)
                     t (jump-target ins)

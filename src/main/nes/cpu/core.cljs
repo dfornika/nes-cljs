@@ -2,8 +2,9 @@
   "A 6502 CPU, written in ClojureScript.
 
   The NES's CPU (a Ricoh 2A03) is a 6502 without decimal mode. This
-  namespace runs its 151 official instructions, one at a time, with the
-  right number of cycles for each.
+  namespace runs its 151 official instructions and 93 unofficial ones
+  (see nes.cpu.opcodes), one at a time, with the right number of cycles
+  for each, and takes interrupts (NMI, IRQ, RESET).
 
   It doesn't know anything about the rest of the NES. It talks to memory
   through a `bus`: a JS object with these methods, so the same CPU can run
@@ -16,6 +17,11 @@
     write(addr, value)  write data
     push(sp, value)     write to the stack at $0100+sp
     pull(sp)            read the stack at $0100+((sp+1) & $FF)
+    readVector(addr)    read an interrupt vector byte ($FFFA-$FFFF)
+    tick()              a cycle with no memory access (some interrupt cycles)
+    dmcDuringInstruction()  true if the sound chip's sample DMA took over the
+                        bus during this instruction (only the unstable
+                        SHA/SHX/SHY/TAS instructions care)
 
   Real 6502s make extra 'dummy' reads and writes in the middle of some
   instructions (an indexed load that crosses a page reads the wrong
@@ -79,7 +85,21 @@
    0x38 2 0xF8 2 0x78 2                                       ; SEC SED SEI
    0x85 3 0x95 4 0x8D 4 0x9D 5 0x99 5 0x81 6 0x91 6          ; STA
    0x86 3 0x96 4 0x8E 4 0x84 3 0x94 4 0x8C 4                 ; STX STY
-   0xAA 2 0xA8 2 0xBA 2 0x8A 2 0x9A 2 0x98 2})               ; transfers
+   0xAA 2 0xA8 2 0xBA 2 0x8A 2 0x9A 2 0x98 2               ; transfers
+   ;; unofficial
+   0x1A 2 0x3A 2 0x5A 2 0x7A 2 0xDA 2 0xFA 2 0x80 2 0x82 2 0x89 2 0xC2 2 0xE2 2   ; NOPs
+   0x0C 4 0x1C 4 0x3C 4 0x5C 4 0x7C 4 0xDC 4 0xFC 4
+   0x04 3 0x44 3 0x64 3 0x14 4 0x34 4 0x54 4 0x74 4 0xD4 4 0xF4 4
+   0xEB 2 0x4B 2 0x0B 2 0x2B 2 0x6B 2 0xCB 2 0x8B 2 0xAB 2                 ; SBC ALR ANC ARR AXS XAA LXA
+   0xA3 6 0xA7 3 0xAF 4 0xB3 5 0xB7 4 0xBF 4                               ; LAX
+   0x83 6 0x87 3 0x8F 4 0x97 4                                             ; SAX
+   0xC3 8 0xC7 5 0xCF 6 0xD3 8 0xD7 6 0xDB 7 0xDF 7                        ; DCP
+   0xE3 8 0xE7 5 0xEF 6 0xF3 8 0xF7 6 0xFB 7 0xFF 7                        ; ISB
+   0x03 8 0x07 5 0x0F 6 0x13 8 0x17 6 0x1B 7 0x1F 7                        ; SLO
+   0x23 8 0x27 5 0x2F 6 0x33 8 0x37 6 0x3B 7 0x3F 7                        ; RLA
+   0x43 8 0x47 5 0x4F 6 0x53 8 0x57 6 0x5B 7 0x5F 7                        ; SRE
+   0x63 8 0x67 5 0x6F 6 0x73 8 0x77 6 0x7B 7 0x7F 7                        ; RRA
+   0x93 6 0x9F 5 0x9B 5 0x9C 5 0x9E 5 0xBB 4})                             ; SHA TAS SHY SHX LAS
 
 (def ^:private mode-codes
   {:imp 0 :acc 1 :imm 2 :zp 3 :zpx 4 :zpy 5 :abs 6 :abx 7 :aby 8 :ind 9 :izx 10 :izy 11 :rel 12})
@@ -87,11 +107,11 @@
 (def ^:private mnemonics
   "Each mnemonic as a number, for a fast `case`."
   (into {} (map-indexed (fn [i m] [m (inc i)])
-                        (sort (distinct (map :mnemonic (vals ops/opcodes)))))))
+                        (sort (distinct (map :mnemonic (vals ops/all-opcodes)))))))
 
 (defn- table [f]
   (let [a (js/Int32Array. 256)]
-    (doseq [[op info] ops/opcodes] (aset a op (f op info)))
+    (doseq [[op info] ops/all-opcodes] (aset a op (f op info)))
     a))
 
 (def ^:private op-ins (table (fn [_ {:keys [mnemonic]}] (mnemonics mnemonic))))
@@ -102,7 +122,7 @@
 (def ^:private op-name
   "Each opcode's mnemonic (a keyword), or nil."
   (let [a (make-array 256)]
-    (doseq [[op {:keys [mnemonic]}] ops/opcodes] (aset a op mnemonic))
+    (doseq [[op {:keys [mnemonic]}] ops/all-opcodes] (aset a op mnemonic))
     a))
 
 (def ^:private op-penalty
@@ -110,12 +130,19 @@
   page: the reads. (Stores and read-modify-writes always take it, and it's
   in their base cycles.)"
   (table (fn [_ {:keys [mnemonic mode]}]
-           (if (and (#{:lda :ldx :ldy :adc :sbc :and :ora :eor :cmp} mnemonic)
+           (if (and (#{:lda :ldx :ldy :adc :sbc :and :ora :eor :cmp :lax :las :nop} mnemonic)
                     (#{:abx :aby :izy} mode))
              1 0))))
 
+(def ^:private official-set (set (keys ops/opcodes)))
+
 (defn official?
   "Is `opcode` one of the 151 official instructions?"
+  [opcode]
+  (contains? official-set opcode))
+
+(defn runnable?
+  "Can this CPU run `opcode`? All but the 12 that jam a real 6502."
   [opcode]
   (pos? (aget op-ins opcode)))
 
@@ -157,35 +184,58 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Interrupts
+;;
+;; An interrupt makes the CPU stop what it's doing, save where it was (PC
+;; and P, on the stack) and jump to an address stored at the top of ROM:
+;; the 'vector'. RTI goes back. The NES uses NMI for 'the picture is
+;; finished' (once a frame), and IRQ for sound and some cartridges.
 
-(defn- interrupt! [^js s ^js bus vector pushed-p]
+(defn- read-vector [^js bus addr]
+  (bit-or (.readVector bus addr) (bit-shift-left (.readVector bus (inc addr)) 8)))
+
+(defn- interrupt! [^js s ^js bus vector]
   (push! s bus (bit-and (bit-shift-right (.-pc s) 8) 0xFF))
   (push! s bus (bit-and (.-pc s) 0xFF))
-  (push! s bus pushed-p)
+  ;; P as pushed by an interrupt: B clear (that's how RTI's caller can
+  ;; tell an interrupt from BRK), the unused bit set
+  (push! s bus (bit-and (bit-or (.-p s) U) (bit-not B)))
   (flag! s I true)
-  (set! (.-pc s) (.read16 bus vector))
+  (set! (.-pc s) (read-vector bus vector))
   (set! (.-cycles s) (+ (.-cycles s) 7))
   7)
 
 (defn nmi!
   "Take a non-maskable interrupt (the PPU's 'frame finished'): save PC and
   P on the stack and jump to the address at $FFFA. Returns 7 (cycles)."
-  [s bus]
-  (interrupt! s bus 0xFFFA (bit-and (bit-or (.-p s) U) (bit-not B))))
+  [s ^js bus]
+  ;; two cycles of the CPU getting ready, with nothing on the bus
+  (.tick bus)
+  (.tick bus)
+  (interrupt! s bus 0xFFFA))
 
 (defn irq!
-  "Take an IRQ, unless interrupts are disabled (I set). Returns the cycles
-  taken (0 or 7)."
+  "Take an IRQ, unless interrupts are disabled (I set): like NMI, through
+  $FFFE. Returns the cycles taken (0 or 7)."
   [s bus]
-  (if (flag? s I) 0 (interrupt! s bus 0xFFFE (bit-and (bit-or (.-p s) U) (bit-not B)))))
+  (if (flag? s I)
+    0
+    (do (flag! s B false)
+        (interrupt! s bus 0xFFFE))))
+
+(defn jump-to-reset-vector!
+  "What RESET does to the CPU, as jsnes models it: go to the address at
+  $FFFC."
+  [^js s bus]
+  (set! (.-pc s) (read-vector bus 0xFFFC))
+  (set! (.-cycles s) (+ (.-cycles s) 7)))
 
 (defn press-reset!
-  "Press RESET: jump to the address at $FFFC, with interrupts disabled."
+  "Press RESET: jump to the address at $FFFC, with interrupts disabled
+  (and the stack pointer moved down 3, as a real 6502 does)."
   [^js s ^js bus]
   (set! (.-sp s) (bit-and (- (.-sp s) 3) 0xFF))
   (flag! s I true)
-  (set! (.-pc s) (.read16 bus 0xFFFC))
-  (set! (.-cycles s) (+ (.-cycles s) 7)))
+  (jump-to-reset-vector! s bus))
 
 ;; ---------------------------------------------------------------------------
 ;; Running one instruction
@@ -213,7 +263,9 @@
             next-pc (bit-and (+ pc (aget op-size op)) 0xFFFF)
             o (bit-and (inc pc) 0xFFFF)          ; where the operand is
             cross (volatile! 0)                  ; 1 if indexing crossed a page
+            base-hi (volatile! 0)                ; high byte of the address before indexing
             index (fn [base i]
+                    (vreset! base-hi (bit-shift-right base 8))
                     (let [addr (bit-and (+ base i) 0xFFFF)]
                       (when (not= (bit-and base 0xFF00) (bit-and addr 0xFF00))
                         ;; reads the wrong page first
@@ -252,6 +304,24 @@
                          (let [old (.read bus addr)]
                            (.write bus addr old)       ; writes the old value back first
                            (.write bus addr (f old))))))
+            ;; the read-modify-write unofficial ones: f gets the old value and
+            ;; returns the new one to write
+            rmw-mem! (fn [f]
+                       (store-dummy!)
+                       (let [old (.read bus addr)]
+                         (.write bus addr old)
+                         (let [new (f old)] (.write bus addr new) new)))
+            ;; SHA/SHX/SHY/TAS: store v AND (high byte of the address + 1). If
+            ;; indexing crossed a page, that value replaces the address's high
+            ;; byte too; and if the sound chip's DMA took the bus meanwhile,
+            ;; the AND doesn't happen. (These are 'unstable' on real chips.)
+            sh! (fn [v]
+                  (when (zero? @cross) (.read bus addr))
+                  (let [val (if (.dmcDuringInstruction bus)
+                              v
+                              (bit-and v (bit-and (inc @base-hi) 0xFF)))
+                        a (if (= 1 @cross) (bit-or (bit-shift-left val 8) (bit-and addr 0xFF)) addr)]
+                    (.write bus a val)))
             extra (volatile! 0)
             branch (fn [taken?] (when taken? (vreset! extra (branch! s bus next-pc addr))))]
         (set! (.-pc s) next-pc)
@@ -331,7 +401,50 @@
           :clv (flag! s V false)
           :cld (flag! s D false)
           :sed (flag! s D true)
-          :nop nil)
+          ;; NOP: the unofficial ones with an address still read it (but the
+          ;; immediate ones don't)
+          :nop (when (#{3 4 6 7} mode) (.read bus addr))
+          ;; ---- unofficial ----
+          :lax (let [v (set-nz! s (.read bus addr))] (set! (.-a s) v) (set! (.-x s) v))
+          :sax (.write bus addr (bit-and (.-a s) (.-x s)))
+          :dcp (let [v (rmw-mem! #(bit-and (dec %) 0xFF))] (compare! s (.-a s) v))
+          :isb (adc! s (bit-xor (rmw-mem! #(bit-and (inc %) 0xFF)) 0xFF))
+          :slo (let [v (rmw-mem! (fn [v] (flag! s C (pos? (bit-and v 0x80))) (bit-and (bit-shift-left v 1) 0xFF)))]
+                 (set! (.-a s) (set-nz! s (bit-or (.-a s) v))))
+          :rla (let [v (rmw-mem! (fn [v] (let [c (if (flag? s C) 1 0)]
+                                           (flag! s C (pos? (bit-and v 0x80)))
+                                           (bit-and (bit-or (bit-shift-left v 1) c) 0xFF))))]
+                 (set! (.-a s) (set-nz! s (bit-and (.-a s) v))))
+          :sre (let [v (rmw-mem! (fn [v] (flag! s C (pos? (bit-and v 1))) (bit-shift-right v 1)))]
+                 (set! (.-a s) (set-nz! s (bit-xor (.-a s) v))))
+          :rra (let [v (rmw-mem! (fn [v] (let [c (if (flag? s C) 0x80 0)]
+                                           (flag! s C (pos? (bit-and v 1)))
+                                           (bit-or (bit-shift-right v 1) c))))]
+                 (adc! s v))
+          :anc (let [v (set-nz! s (bit-and (.-a s) (.read bus addr)))]
+                 (set! (.-a s) v)
+                 (flag! s C (pos? (bit-and v 0x80))))
+          :alr (let [v (bit-and (.-a s) (.read bus addr))]
+                 (flag! s C (pos? (bit-and v 1)))
+                 (set! (.-a s) (set-nz! s (bit-shift-right v 1))))
+          :arr (let [v (bit-and (.-a s) (.read bus addr))
+                     r (bit-or (bit-shift-right v 1) (if (flag? s C) 0x80 0))]
+                 (set! (.-a s) (set-nz! s r))
+                 (flag! s C (pos? (bit-and v 0x80)))
+                 (flag! s V (pos? (bit-and (bit-xor (bit-shift-right v 7) (bit-shift-right v 6)) 1))))
+          :axs (let [t (- (bit-and (.-x s) (.-a s)) (.read bus addr))]
+                 (flag! s C (>= t 0))
+                 (set! (.-x s) (set-nz! s (bit-and t 0xFF))))
+          :las (let [v (bit-and (.read bus addr) (.-sp s))]
+                 (set! (.-a s) (set-nz! s v)) (set! (.-x s) v) (set! (.-sp s) v))
+          :xaa (set! (.-a s) (set-nz! s (bit-and (bit-or (.-a s) 0xFF) (.-x s) (.read bus addr))))
+          :lxa (let [v (set-nz! s (bit-and (bit-or (.-a s) 0xFF) (.read bus addr)))]
+                 (set! (.-a s) v) (set! (.-x s) v))
+          :sha (sh! (bit-and (.-a s) (.-x s)))
+          :shx (sh! (.-x s))
+          :shy (sh! (.-y s))
+          :tas (do (set! (.-sp s) (bit-and (.-a s) (.-x s)))
+                   (sh! (.-sp s))))
         (let [cycles (+ (aget op-cycles op) (* @cross (aget op-penalty op)) @extra)]
           (set! (.-cycles s) (+ (.-cycles s) cycles))
           cycles)))))
@@ -349,5 +462,8 @@
          :read rd
          :read16 (fn [a] (bit-or (rd a) (bit-shift-left (rd (inc a)) 8)))
          :write (fn [a v] (when (< a 0x8000) (aset mem a v)))
+         :readVector rd
+         :tick (fn [])
+         :dmcDuringInstruction (fn [] false)
          :push (fn [sp v] (aset mem (bit-or 0x100 sp) v))
          :pull (fn [sp] (aget mem (bit-or 0x100 (bit-and (inc sp) 0xFF))))}))

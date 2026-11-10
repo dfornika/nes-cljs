@@ -26,7 +26,7 @@
   "Instruction size by opcode. Unofficial opcodes count as 1 byte."
   (let [a (js/Uint8Array. 256)]
     (.fill a 1)
-    (doseq [[op {:keys [size]}] ops/opcodes] (aset a op size))
+    (doseq [[op {:keys [size]}] ops/all-opcodes] (aset a op size))
     a))
 
 (defn create
