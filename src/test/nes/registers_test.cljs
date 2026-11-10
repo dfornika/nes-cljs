@@ -40,3 +40,15 @@
   (is (= "JOY1" (:name (regs/register-at 0x4016 true))) "the same register either way")
   (is (= "4-step sequence, no IRQ" (regs/describe 0x4017 0x40 true)))
   (is (= "button pressed" (regs/describe 0x4017 0x41 false))))
+
+(deftest destinations
+  (is (= :ppu (regs/destination 0x2007 true)))
+  (is (= :ppu (regs/destination 0x3FFA false)) "a mirror of PPUSTATUS")
+  (is (= :sprite-dma (regs/destination 0x4014 true)))
+  (is (= :controllers (regs/destination 0x4016 true)))
+  (is (= :controllers (regs/destination 0x4017 false)))
+  (is (= :sound (regs/destination 0x4017 true)) "writing $4017 goes to the APU")
+  (is (= :sound (regs/destination 0x4000 true)))
+  (is (= :mapper (regs/destination 0x8000 true)))
+  (is (nil? (regs/destination 0x8000 false)) "reading ROM isn't I/O")
+  (is (nil? (regs/destination 0x0300 true))))

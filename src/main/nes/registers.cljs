@@ -180,3 +180,28 @@
         :let [raw (reduce (fn [acc b] (bit-or (bit-shift-left acc 1) (if (bit-test v b) 1 0)))
                           0 bits)]]
     (assoc f :raw raw :value (if values (nth values raw) raw))))
+
+;; ---------------------------------------------------------------------------
+;; Where an access goes
+
+(def destinations
+  "The places an I/O access on the CPU's bus can go, in the order to show
+  them. Each is a different chip (or part of one) the address decoder on
+  the board picks."
+  [{:id :ppu :label "PPU" :about "The PPU's 8 registers, $2000-$2007 (repeated up to $3FFF)"}
+   {:id :sprite-dma :label "Sprite DMA" :about "$4014: copy 256 bytes of RAM to the PPU's sprite memory"}
+   {:id :controllers :label "Controllers" :about "$4016 (read and write) and $4017 (read)"}
+   {:id :sound :label "Sound" :about "The APU's registers, $4000-$4013, $4015 and writes to $4017. The APU is inside the CPU chip, so these never leave it."}
+   {:id :mapper :label "Mapper" :about "Writes to $8000-$FFFF: ROM ignores them, the mapper chip on the cartridge listens"}])
+
+(defn destination
+  "Where an access to `addr` goes: one of the `destinations` ids, or nil
+  for addresses that aren't I/O (RAM, ROM reads)."
+  [addr write?]
+  (cond
+    (<= 0x2000 addr 0x3FFF) :ppu
+    (= addr 0x4014) :sprite-dma
+    (or (= addr 0x4016) (and (= addr 0x4017) (not write?))) :controllers
+    (<= 0x4000 addr 0x4017) :sound
+    (and write? (>= addr 0x8000)) :mapper
+    :else nil))

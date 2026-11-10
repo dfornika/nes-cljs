@@ -22,6 +22,36 @@
 
 (defonce ^:private hover (r/atom nil))
 
+;; What the bus log shows: destinations and registers hidden, which
+;; destination's registers are listed, and a wire (or chip) to show only
+;; the traffic of: [:link id] or [:chip id].
+(defonce ^:private bus-filter (r/atom {:hidden #{} :hidden-regs #{} :expanded nil :only nil}))
+
+;; ---------------------------------------------------------------------------
+;; Where each logged access went
+
+(def ^:private dest-colors
+  {:ppu "#0969da" :sprite-dma "#bf8700" :controllers "#1a7f37" :sound "#cf222e" :mapper "#6e7781"})
+
+(defn- route
+  "The wires and chips a logged access traveled over: {:links #{} :chips #{}}.
+  All of these are on the CPU's bus; a PPUDATA access then carries on over
+  the PPU's own bus, to wherever the PPU's address points."
+  [{:keys [addr write? target]}]
+  (case (registers/destination addr write?)
+    :ppu {:links (cond-> #{:ppu-regs} (= target :chr) (conj :chr) (= target :vram) (conj :vram))
+          :chips (cond-> #{:ppu}
+                   (= target :chr) (conj :chr) (= target :vram) (conj :vram) (= target :pal) (conj :palette))}
+    :sprite-dma {:links #{:dma :wram} :chips #{:wram :oam}}
+    :controllers {:links #{:pad} :chips #{:pad}}
+    ;; the sound chip is inside the CPU: no wire at all
+    :sound {:links #{} :chips #{:apu}}
+    :mapper {:links #{:mapper} :chips #{:mapper}}
+    {:links #{} :chips #{}}))
+
+(defn- on-route? [{:keys [links chips]} [kind id]]
+  (case kind :link (contains? links id) :chip (contains? chips id) false))
+
 ;; ---------------------------------------------------------------------------
 ;; Parts of the diagram
 
@@ -189,11 +219,17 @@
                 (memory-view/show! space addr)
                 (swap! db assoc :inspector-tab :memory)))))
 
-(defn- chip [{:keys [id x y w h title sub dashed? inner? outside? nav]} hovered? lit?]
+(defn- chip [{:keys [id x y w h title sub dashed? inner? outside? nav]} hovered? lit? traced]
   [:g {:on-mouse-enter #(reset! hover [:chip id])
        :on-mouse-leave #(reset! hover nil)
-       :on-click #(navigate! nav)
-       :style {:cursor (if nav "pointer" "default")}}
+       :on-click #(if (= id :apu)
+                    ;; the APU has no wire to click: clicking it shows its traffic
+                    (swap! bus-filter update :only (fn [o] (when (not= o [:chip :apu]) [:chip :apu])))
+                    (navigate! nav))
+       :style {:cursor (if (or nav (= id :apu)) "pointer" "default")}}
+   (when traced
+     [:rect {:x (- x 5) :y (- y 8) :width (+ w 10) :height (+ h 16) :rx 6
+             :fill "none" :stroke traced :stroke-width 4 :opacity 0.8}])
    ;; little pins along the top and bottom, like a real chip
    (when-not (or inner? outside?)
      (for [px (range (+ x 12) (+ x w -6) 14)]
@@ -217,10 +253,17 @@
              :font-size (if inner? 10 12)}
       sub])])
 
-(defn- link-path [{:keys [id d color dashed? label]} {:keys [level text reads writes]} hovered?]
+(defn- link-path [{:keys [id d color dashed? label]} {:keys [level text reads writes]} hovered? traced selected?]
   (let [[lx ly anchor] label]
     [:g {:on-mouse-enter #(reset! hover [:link id])
-         :on-mouse-leave #(reset! hover nil)}
+         :on-mouse-leave #(reset! hover nil)
+         :on-click #(swap! bus-filter update :only (fn [o] (when (not= o [:link id]) [:link id])))
+         :style {:cursor "pointer"}}
+     ;; the route of the bus log entry under the mouse
+     (when traced
+       [:path {:d d :fill "none" :stroke traced :stroke-width 12 :stroke-linecap "round" :opacity 0.5}])
+     (when selected?
+       [:path {:d d :fill "none" :stroke "#fd8c73" :stroke-width 9 :stroke-linecap "round" :opacity 0.5}])
      ;; the idle wire
      [:path {:d d :fill "none" :stroke (if hovered? "#fd8c73" "#afb8c1") :stroke-width (if hovered? 4 2.5)
              :stroke-dasharray (when dashed? "5 4")}]
@@ -240,6 +283,9 @@
 
 (defn- diagram [header activity step?]
   (let [h @hover
+        [hk route-hovered color-hovered] h
+        traced (fn [kind id] (when (and (= hk :event) (on-route? route-hovered [kind id])) color-hovered))
+        only (:only @bus-filter)
         acts (into {} (for [l links] [(:id l) (link-activity l activity step?)]))
         counts (:counts activity)
         lit {:oam (pos? (get counts :dma 0))
@@ -264,9 +310,9 @@
         [:path {:d "M360,80 H240"}]
         [:path {:d "M540,75 H570 V60 H680"}]])
      (for [l links]
-       ^{:key (:id l)} [link-path l (acts (:id l)) (= h [:link (:id l)])])
+       ^{:key (:id l)} [link-path l (acts (:id l)) (= h [:link (:id l)]) (traced :link (:id l)) (= only [:link (:id l)])])
      (for [c (chips header)]
-       ^{:key (:id c)} [chip c (= h [:chip (:id c)]) (lit (:id c))])]))
+       ^{:key (:id c)} [chip c (or (= h [:chip (:id c)]) (= only [:chip (:id c)])) (lit (:id c)) (traced :chip (:id c))])]))
 
 ;; ---------------------------------------------------------------------------
 ;; Text panels
@@ -282,36 +328,126 @@
        :link (let [{:keys [title about] :as l} (some #(when (= id (:id %)) %) links)
                    {:keys [text]} (link-activity l activity step?)]
                [:div [:strong title] (when text [:span {:style (merge mono muted)} " · " text])
-                [:div about]])
+                [:div about]
+                [:div {:style (merge muted {:font-size "12px"})}
+                 "Its entries in the bus log are highlighted. Click to show only those."]])
+       :event (let [[_ _ _ text] @hover] [:div text])
        [:div {:style muted}
         "Hover over a chip or a wire to see what it does; click a chip to inspect it. "
         "Wires light up with traffic on the CPU's bus, flowing in the direction the data moves."])]))
 
-(defn- event-line [{:keys [addr value write? repeat frame scanline]}]
-  (let [{:keys [name]} (registers/register-at addr write?)
+(def ^:private link-titles
+  {:ppu-regs "the CPU–PPU wire" :chr "on to CHR (PPU bus)" :vram "on to video RAM (PPU bus)"
+   :dma "the sprite DMA path" :wram "work RAM" :pad "the controller wire" :mapper "the cartridge wire"})
+
+(defn- route-text
+  "An access and its route, in words, for the hover panel."
+  [{:keys [addr write? value target dest reg]}]
+  (str (when reg (str reg " ")) (if write? "write ← " "read → ") (hex value 2) ": "
+       (case dest
+         :ppu (str "CPU → PPU registers over the CPU's bus"
+                   (case target
+                     :chr ", then the PPU carries it on over its own bus to CHR"
+                     :vram ", then the PPU carries it on over its own bus to video RAM"
+                     :pal ", into palette RAM inside the PPU"
+                     ""))
+         :sprite-dma "CPU → sprite DMA: 256 bytes from work RAM into the PPU's sprite memory (OAM)"
+         :controllers (if write? "CPU → controllers (latching the buttons)" "controller → CPU (one button)")
+         :sound "CPU → APU. The sound chip is inside the CPU, so this access never leaves the chip"
+         :mapper "CPU → cartridge: ROM ignores it, the mapper chip acts on it"
+         "")))
+
+(defn- event-line [{:keys [write? value repeat frame scanline dest reg addr route] :as e} highlight?]
+  (let [color (dest-colors dest "#8c959f")
         desc (registers/describe addr value write?)]
-    [:tr
-     [:td {:style (merge muted {:padding-right "8px" :white-space "nowrap"})} frame ":" scanline]
+    [:tr {:style {:background (when highlight? "#fff8c5") :cursor "default"}
+          :on-mouse-enter #(reset! hover [:event route color (route-text e)])
+          :on-mouse-leave #(reset! hover nil)}
+     [:td {:style {:width "4px" :background color :padding 0}}]
+     [:td {:style (merge muted {:padding "0 8px 0 6px" :white-space "nowrap"})} frame ":" scanline]
      [:td {:style {:padding-right "6px" :color (if write? "#cf222e" "#1a7f37")}} (if write? "W" "R")]
-     [:td {:style {:padding-right "6px"}} name]
+     [:td {:style {:padding-right "6px"}} reg]
      [:td {:style (merge muted {:padding-right "6px"})} (subs (hex addr 4) 1)]
      [:td {:style {:padding-right "8px" :white-space "nowrap"}} (if write? "← " "→ ") (hex value 2)]
      [:td {:style muted} desc (when (> repeat 1) (str " (×" repeat ")"))]]))
 
+(defn- toggle [s x] (if (contains? s x) (disj s x) (conj s x)))
+
+(defn- filter-bar [events]
+  (let [{:keys [hidden hidden-regs expanded only]} @bus-filter
+        by-dest (group-by :dest events)]
+    [:div {:style {:font-size "12px" :margin-bottom "6px"}}
+     [:div {:style {:display "flex" :gap "6px" :flex-wrap "wrap" :align-items "center"}}
+      (for [{:keys [id label about]} registers/destinations
+            :let [n (reduce + (map :repeat (by-dest id)))
+                  on? (not (hidden id))
+                  color (dest-colors id)]]
+        ^{:key id}
+        [:span {:style {:display "inline-flex" :align-items "center"
+                        :border (str "1px solid " (if on? color "#d0d7de")) :border-radius "12px"
+                        :background (if on? "white" "#f6f8fa") :opacity (if on? 1 0.6)}}
+         [:button {:title (str about ". Click to " (if on? "hide" "show") " these.")
+                   :on-click #(swap! bus-filter update :hidden toggle id)
+                   :style {:border "none" :background "none" :cursor "pointer" :padding "2px 4px 2px 8px"
+                           :display "inline-flex" :gap "5px" :align-items "center" :font-size "12px"}}
+          [:span {:style {:width "9px" :height "9px" :border-radius "2px"
+                          :background (if on? color "transparent") :border (str "1.5px solid " color)}}]
+          label [:span {:style muted} n]]
+         [:button {:title "Show or hide individual registers"
+                   :on-click #(swap! bus-filter update :expanded (fn [e] (when (not= e id) id)))
+                   :style {:border "none" :background "none" :cursor "pointer" :padding "2px 8px 2px 2px"
+                           :color "#57606a" :font-size "11px"}}
+          (if (= expanded id) "▾" "▸")]])
+      (when only
+        [:span {:style {:display "inline-flex" :gap "4px" :align-items "center" :margin-left "6px"
+                        :background "#fff1e5" :border "1px solid #fd8c73" :border-radius "12px"
+                        :padding "1px 4px 1px 8px"}}
+         "Only " (if (= only [:chip :apu]) "the APU (inside the CPU)"
+                     (:title (some #(when (= (second only) (:id %)) %) links)))
+         [:button {:on-click #(swap! bus-filter assoc :only nil) :title "Show everything again"
+                   :style {:border "none" :background "none" :cursor "pointer"}} "✕"]])]
+     (when expanded
+       (let [regs (sort-by key (frequencies (mapcat #(repeat (:repeat %) (:reg %)) (by-dest expanded))))]
+         [:div {:style {:display "flex" :gap "4px 14px" :flex-wrap "wrap" :margin "6px 0 0 8px"}}
+          (if (empty? regs)
+            [:span {:style muted} "None in the log yet."]
+            (for [[reg n] regs]
+              ^{:key reg}
+              [:label {:style {:cursor "pointer" :white-space "nowrap"}}
+               [:input {:type "checkbox" :checked (not (hidden-regs reg))
+                        :on-change #(swap! bus-filter update :hidden-regs toggle reg)}]
+               " " [:span {:style mono} reg] [:span {:style muted} " " n]]))]))]))
+
 (defn- bus-log []
-  (let [log @console/bus-log]
+  (let [log @console/bus-log
+        {:keys [hidden hidden-regs only]} @bus-filter
+        h @hover
+        events (for [{:keys [addr write?] :as e} log]
+                 (assoc e
+                        :dest (registers/destination addr write?)
+                        :reg (:name (registers/register-at addr write?))
+                        :route (route e)))
+        shown (filter #(and (not (hidden (:dest %)))
+                            (not (hidden-regs (:reg %)))
+                            (or (nil? only) (on-route? (:route %) only)))
+                      events)
+        hovered-part (when (#{:link :chip} (first h)) h)]
     [:div {:style {:margin-top "12px"}}
      [:h4 {:style {:margin "0 0 4px"}} "Bus log"]
-     [:div {:style (merge muted {:font-size "12px" :margin-bottom "6px"})}
-      "Accesses to I/O registers and the mapper, newest first. "
-      "Frame:scanline, read or write, register, address, value. Repeats are counted, not repeated."]
-     (if (empty? log)
-       [:div {:style (merge muted {:font-size "13px"})} "Nothing yet."]
+     [:div {:style (merge muted {:font-size "12px" :margin-bottom "6px" :max-width "760px"})}
+      "All the blue wires are one bus: the CPU puts an address on it each cycle, and a chip on the "
+      "board decides which part answers. This lists the accesses to registers and the mapper, newest "
+      "first (RAM and ROM reads are most of the traffic, and are left out). Hover over one to see its "
+      "route on the schematic; click a wire to show only its traffic. "
+      "Frame:scanline, read or write, register, address, value."]
+     [filter-bar events]
+     (if (empty? shown)
+       [:div {:style (merge muted {:font-size "13px"})} (if (empty? log) "Nothing yet." "Nothing to show with these filters.")]
        [:div {:style {:max-height "260px" :overflow-y "auto"}}
         [:table {:style (merge mono {:font-size "12px" :border-collapse "collapse"})}
          [:tbody
-          (for [[i e] (map-indexed vector (take 80 (rseq log)))]
-            ^{:key i} [event-line e])]]])]))
+          (for [[i e] (map-indexed vector (take 80 (reverse shown)))]
+            ^{:key i} [event-line e (and hovered-part (on-route? (:route e) hovered-part))])]]])]))
 
 (defn- step-accesses [{:keys [accesses dropped]}]
   [:div {:style {:margin-top "12px"}}

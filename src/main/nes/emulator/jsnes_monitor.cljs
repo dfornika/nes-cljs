@@ -49,19 +49,23 @@
     (aset (.-accW m) i (if write? 1 0))
     (set! (.-accN m) (inc (.-accN m)))))
 
-(defn- log-event! [^js m ^js ppu addr v write?]
+(defn- log-event!
+  "Log an I/O access. `target` is where in PPU memory a PPUDATA access
+  went (\"chr\", \"vram\" or \"pal\"), else nil."
+  [^js m ^js ppu addr v write? target]
   (let [^js events (.-events m)
         ^js last-event (when (pos? (.-length events)) (aget events (dec (.-length events))))]
     (if (and last-event
              (= addr (.-addr last-event))
              (= write? (.-write last-event))
-             (= v (.-value last-event)))
+             (= v (.-value last-event))
+             (= target (.-target last-event)))
       ;; The same access again (like a loop polling PPUSTATUS): count it
       ;; instead of logging it again.
       (set! (.-repeat last-event) (inc (.-repeat last-event)))
       (do
         (.push events #js {:addr addr :value v :write write? :repeat 1
-                           :scanline (.-scanline ppu)})
+                           :scanline (.-scanline ppu) :target target})
         (when (> (.-length events) max-events) (.shift events))))))
 
 (defn- ram-access! [^js m addr v write?]
@@ -78,24 +82,25 @@
 
 (defn- bus-access!
   "Count and record an access that went through the cartridge connector
-  or to an I/O register (anything at $2000 and up)."
-  [^js m ^js ppu addr v write?]
+  or to an I/O register (anything at $2000 and up). `target`: see
+  `log-event!`."
+  [^js m ^js ppu addr v write? target]
   (remember! m addr v write?)
   (cond
     (< addr 0x2000) (bump! m (if write? "ramW" "ramR") 1)
     (< addr 0x4000) (do (bump! m (if write? "ppuW" "ppuR") 1)
-                        (log-event! m ppu addr v write?))
+                        (log-event! m ppu addr v write? target))
     (= addr 0x4014) (do (bump! m "dma" 256)
-                        (log-event! m ppu addr v write?))
+                        (log-event! m ppu addr v write? target))
     (or (= addr 0x4016) (and (= addr 0x4017) (not write?)))
     (do (bump! m (if write? "padW" "padR") 1)
-        (log-event! m ppu addr v write?))
+        (log-event! m ppu addr v write? target))
     (< addr 0x4020) (do (bump! m (if write? "apuW" "apuR") 1)
-                        (log-event! m ppu addr v write?))
+                        (log-event! m ppu addr v write? target))
     (< addr 0x6000) nil
     (< addr 0x8000) (bump! m (if write? "cartW" "cartR") 1)
     write? (do (bump! m "mapperW" 1)
-               (log-event! m ppu addr v write?))
+               (log-event! m ppu addr v write? target))
     :else (bump! m "prgR" 1)))
 
 (defn- ppudata? [addr]
@@ -188,14 +193,15 @@
                   (let [target (when (ppudata? addr) (ppudata-target ppu))
                         v (.call mload mmap addr)]
                     (when target (bump! m target 1))
-                    (bus-access! m ppu addr v false)
+                    (bus-access! m ppu addr v false target)
                     v)
                   (.call mload mmap addr))))
         (set! (.-write mmap)
               (fn [addr v]
                 (when-let [m (.-monitor state)]
-                  (when (ppudata? addr) (bump! m (ppudata-target ppu) 1))
-                  (bus-access! m ppu addr v true))
+                  (let [target (when (ppudata? addr) (ppudata-target ppu))]
+                    (when target (bump! m target 1))
+                    (bus-access! m ppu addr v true target)))
                 (.call mwrite mmap addr v)))))))
 
 (defn uninstall!
@@ -230,7 +236,8 @@
   "Everything recorded since the last call, as ClojureScript data, and
   reset the counters:
   `:counts` - map of counter name (keyword) to count
-  `:events` - I/O register accesses, oldest first
+  `:events` - I/O register accesses, oldest first; PPUDATA ones have a
+               `:target`, :chr :vram or :pal
   `:accesses` - the most recent bus accesses (at most `ring-size`), oldest first
   `:dropped` - how many more accesses happened than `:accesses` holds"
   [^js m]
@@ -239,6 +246,7 @@
         events (vec (for [^js e (.-events m)]
                       {:addr (.-addr e) :value (.-value e) :write? (.-write e)
                        :repeat (.-repeat e)
+                       :target (some-> (.-target e) keyword)
                        :scanline (jsnes-scanline->scanline (.-scanline e))}))
         n (.-accN m)
         new-count (- n (.-accTaken m))

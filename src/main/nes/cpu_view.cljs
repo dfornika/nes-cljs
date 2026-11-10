@@ -102,8 +102,9 @@
          [:td {:style (merge mono {:padding "1px 6px" :white-space "pre"})
                :title (when mnemonic (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)))}
           [mnemonic-link instr]]
+         ;; one line each, so the listing keeps its height as the game runs
          [:td {:style {:padding "1px 6px" :color (if (zero? i) "#24292f" "#57606a")
-                       :font-size "12px"}}
+                       :font-size "12px" :white-space "nowrap"}}
           ;; the instruction about to run, with the actual addresses and values
           (ref/explain instr (when (zero? i) {:regs regs :peek peek}))]])]]))
 
@@ -128,36 +129,39 @@
 (defn- stack-view [emulator sp]
   (let [top (+ 0x101 sp)]
     (if (> top 0x1FF)
-      [:div {:style muted} "Empty."]
+      [:div {:style (merge muted {:height "262px"})} "Empty."]
       [:div
        [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px" :max-width "340px"})}
         "The stack is RAM at $0100-$01FF, filled from the top down: JSR saves where to come back to "
         "here (2 bytes), and PHA saves A. Newest first:"]
-       [:table {:style {:font-size "13px" :border-collapse "collapse"}}
-        [:tbody
-         (loop [a top rows [] n 0]
-           (if (or (> a 0x1FF) (= n 12))
-             (seq (cond-> rows (<= a 0x1FF) (conj ^{:key "more"} [:tr [:td {:style muted} "…"]])))
-             (if-let [{:keys [returns-to jsr-at target]} (when (< a 0x1FF) (return-address emulator a))]
-               (recur (+ a 2)
-                      (conj rows
-                            ^{:key a}
-                            [:tr
-                             [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1) "–" (subs (hex (inc a) 4) 3)]
-                             [:td {:style (merge mono {:padding "1px 8px 1px 0"})}
-                              (subs (hex (emu/cpu-peek emulator a) 2) 1) " " (subs (hex (emu/cpu-peek emulator (inc a)) 2) 1)]
-                             [:td {:style {:font-size "12px"}}
-                              "return address: back to " [:span {:style mono} (hex returns-to 4)]
-                              [:span {:style muted} " (after the call to " (hex target 4) " at " (hex jsr-at 4) ")"]]])
-                      (inc n))
-               (recur (inc a)
-                      (conj rows
-                            ^{:key a}
-                            [:tr
-                             [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1)]
-                             [:td {:style (merge mono {:padding "1px 8px 1px 0"})} (subs (hex (emu/cpu-peek emulator a) 2) 1)]
-                             [:td]])
-                      (inc n)))))]]])))
+       ;; a fixed height (room for 12 rows), so what's below doesn't jump
+       ;; around as the stack grows and shrinks
+       [:div {:style {:height "220px" :overflow "hidden"}}
+        [:table {:style {:font-size "13px" :border-collapse "collapse"}}
+         [:tbody
+          (loop [a top rows [] n 0]
+            (if (or (> a 0x1FF) (= n 12))
+              (seq (cond-> rows (<= a 0x1FF) (conj ^{:key "more"} [:tr [:td {:style muted} "…"]])))
+              (if-let [{:keys [returns-to jsr-at target]} (when (< a 0x1FF) (return-address emulator a))]
+                (recur (+ a 2)
+                       (conj rows
+                             ^{:key a}
+                             [:tr
+                              [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1) "–" (subs (hex (inc a) 4) 3)]
+                              [:td {:style (merge mono {:padding "1px 8px 1px 0"})}
+                               (subs (hex (emu/cpu-peek emulator a) 2) 1) " " (subs (hex (emu/cpu-peek emulator (inc a)) 2) 1)]
+                              [:td {:style {:font-size "12px"}}
+                               "return address: back to " [:span {:style mono} (hex returns-to 4)]
+                               [:span {:style muted} " (after the call to " (hex target 4) " at " (hex jsr-at 4) ")"]]])
+                       (inc n))
+                (recur (inc a)
+                       (conj rows
+                             ^{:key a}
+                             [:tr
+                              [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1)]
+                              [:td {:style (merge mono {:padding "1px 8px 1px 0"})} (subs (hex (emu/cpu-peek emulator a) 2) 1)]
+                              [:td]])
+                       (inc n)))))]]]])))
 
 (defn- word-at [emulator addr]
   (let [lo (emu/cpu-peek emulator addr) hi (emu/cpu-peek emulator (inc addr))]
