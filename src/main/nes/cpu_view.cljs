@@ -191,6 +191,47 @@
         [:td {:style (merge muted {:padding "2px 0" :font-size "12px" :max-width "240px"})} about]])]]])
 
 ;; ---------------------------------------------------------------------------
+;; Which CPU
+
+(defn- cpu-choice
+  "`_tick` is the inspector tick, so the counts here refresh."
+  [emulator _tick]
+  (let [which (emu/cpu-in-use emulator)
+        {:keys [cljs jsnes]} (emu/cpu-stats emulator)
+        {:keys [running? frame of same-for differs-at jsnes-ms cljs-ms stats] :as cmp} (:cpu-compare @db)
+        option (fn [k label]
+                 [:label {:style {:margin-right "14px" :cursor "pointer"}}
+                  [:input {:type "radio" :name "cpu" :checked (= which k)
+                           :on-change #(console/use-cpu! k)}]
+                  " " label])]
+    [:div {:style {:border "1px solid #d0d7de" :border-radius "6px" :padding "8px 12px"
+                   :margin-bottom "14px" :font-size "13px"}}
+     [:div [:strong "Run the CPU with: "]
+      [option :jsnes "jsnes's 6502 (JavaScript)"]
+      [option :cljs "NES.cljs's own 6502 (ClojureScript)"]]
+     [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
+      (if (= which :cljs)
+        [:span "nes.cpu.core runs each instruction; the PPU, sound and cartridge are still jsnes's. "
+         "jsnes still takes interrupts and the few unofficial instructions some games use. So far: "
+         [:span {:style mono} cljs] " instructions by ClojureScript, "
+         [:span {:style mono} jsnes] " by jsnes."]
+        "The rest of the console (PPU, sound, cartridge) is jsnes either way. You can switch while a game runs.")]
+     [:div {:style {:margin-top "6px" :display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
+      [:button {:disabled running? :on-click #(console/compare-cpus! 600)
+                :title "Run this game from power on with each CPU for 600 frames (10 seconds of game time), comparing the picture and RAM after every frame"}
+       "Compare the two CPUs"]
+      (cond
+        running? [:span {:style muted} "running… frame " frame " of " of]
+        same-for [:span [:span {:style {:color "#1a7f37" :font-weight "bold"}} "✓ identical"]
+                  " picture and RAM for all " same-for " frames. Time: jsnes "
+                  (js/Math.round jsnes-ms) " ms, ClojureScript " (js/Math.round cljs-ms) " ms ("
+                  (.toFixed (/ cljs-ms (max jsnes-ms 1)) 1) "×)."
+                  (when stats [:span {:style muted} " ClojureScript ran " (:cljs stats) " instructions, jsnes "
+                               (:jsnes stats) " (interrupts and unofficial ones)."])]
+        differs-at [:span {:style {:color "#cf222e" :font-weight "bold"}}
+                    "✗ they differ from frame " differs-at])]]))
+
+;; ---------------------------------------------------------------------------
 
 (defn cpu-view []
   @console/inspect-tick
@@ -199,6 +240,7 @@
           {:keys [scanline dot frame]} (emu/ppu-state emulator)
           paused? (= :paused (:status @db))]
       [:div
+       [cpu-choice emulator @console/inspect-tick]
        (when-not paused?
          [:p {:style (merge muted {:margin-top 0 :font-size "14px"})}
           "Pause, then use " [:strong "Step instruction"]

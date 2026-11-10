@@ -168,6 +168,22 @@ try {
     check(true, `code log: finds routines (${n} listed)`);
   });
 
+  await step('ClojureScript CPU', async () => {
+    // Swap in NES.cljs's own 6502: the game keeps running, and a short
+    // run with each CPU gives identical pictures and RAM.
+    await page.click('button:text-is("CPU")');
+    await page.click('text=NES.cljs\'s own 6502');
+    const f0 = await frame();
+    await until(async () => (await frame()) > f0 + 30);
+    await page.click('button:text-is("Compare the two CPUs")');
+    const verdict = await until(async () => {
+      const t = await page.locator('text=/identical|they differ/').first().textContent().catch(() => '');
+      return t.trim();
+    }, 120000);
+    check(verdict.includes('identical'), `ClojureScript CPU runs, and matches jsnes (${verdict.slice(0, 60)})`);
+    await page.click('text=jsnes\'s 6502');
+  });
+
   await step('lens editing', async () => {
     // Pause, set Concentration Room's tries-left to 42.
     await page.click('button:text-is("Pause")');

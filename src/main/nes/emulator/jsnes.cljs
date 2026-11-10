@@ -13,6 +13,7 @@
   (:require ["jsnes" :refer [NES Controller]]
             [nes.breakpoints :as bp]
             [nes.emulator :as emu]
+            [nes.emulator.jsnes-cljs-cpu :as cljs-cpu]
             [nes.emulator.jsnes-code-log :as code-log]
             [nes.emulator.jsnes-monitor :as monitor]))
 
@@ -149,7 +150,10 @@
     (monitor/uninstall! nes))
   (if-let [l (.-codeLog state)]
     (code-log/install! l nes)
-    (code-log/uninstall! nes)))
+    (code-log/uninstall! nes))
+  (if (.-cljsCpu state)
+    (cljs-cpu/install! nes (.-cpuStats state))
+    (cljs-cpu/uninstall! nes)))
 
 (defrecord JsnesEmulator [^js nes ^js state]
   emu/Emulator
@@ -361,6 +365,15 @@
          :chr-size (* 4096 (.-vromCount rom))
          :recording? (some? (.-codeLog state))})))
 
+  emu/CpuChoice
+  (use-cpu! [_ which]
+    (set! (.-cljsCpu state) (= which :cljs))
+    (set! (.-cpuStats state) #js {:cljs 0 :jsnes 0})
+    (reinstall-monitor! nes state))
+  (cpu-in-use [_] (if (.-cljsCpu state) :cljs :jsnes))
+  (cpu-stats [_]
+    (let [^js st (.-cpuStats state)] {:cljs (.-cljs st) :jsnes (.-jsnes st)}))
+
   emu/Debug
   (set-breakpoints! [_ bps]
     (let [bps (vec bps)
@@ -388,4 +401,6 @@
         :bps [] :bpFlags nil :watch nil :hit nil :skipExec -1 :instrPc 0
         :romFile nil
         ;; the code/data log while recording, and kept after stopping
-        :codeLog nil :codeLogKept nil}))
+        :codeLog nil :codeLogKept nil
+        ;; true to run the CPU with nes.cpu.core (see emu/CpuChoice)
+        :cljsCpu false :cpuStats #js {:cljs 0 :jsnes 0}}))

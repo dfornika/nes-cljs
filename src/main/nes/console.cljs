@@ -26,6 +26,10 @@
 ;; for ROMs loaded later.
 (defonce ^:private code-logging? (atom false))
 
+;; Which CPU runs the game: :jsnes or :cljs (see nes.emulator/CpuChoice),
+;; kept for ROMs loaded later.
+(defonce ^:private cpu-choice (atom :jsnes))
+
 (defn emulator-instance
   "The current emulator, for poking at from the REPL."
   []
@@ -79,6 +83,61 @@
   (reset! code-logging? on?)
   (when-let [e @emulator] (emu/log-code! e on?))
   (swap! db assoc :code-logging? on?))
+
+(defn use-cpu!
+  "Run the game's CPU with :jsnes or :cljs (NES.cljs's own), now and for
+  ROMs loaded later."
+  [which]
+  (reset! cpu-choice which)
+  (when-let [e @emulator] (emu/use-cpu! e which))
+  (swap! db assoc :cpu which))
+
+(defn- frame-hash
+  "A quick fingerprint of a frame and the CPU's RAM, for comparing."
+  [^js pixels ^js ram]
+  (let [h (volatile! 17)]
+    (dotimes [i (.-length pixels)] (vreset! h (bit-or (+ (* @h 31) (aget pixels i)) 0)))
+    (dotimes [i 0x800] (vreset! h (bit-or (+ (* @h 31) (aget ram i)) 0)))
+    @h))
+
+(defn compare-cpus!
+  "Run the loaded game twice from power on, once with each CPU, for
+  `frames` frames with no buttons pressed, comparing the picture and RAM
+  after every frame. Progress and the result go in `db` under
+  :cpu-compare. Runs in small chunks, so the page stays responsive."
+  [frames]
+  (when-let [e @emulator]
+    (let [bytes (emu/rom-file e)
+          make (fn [which]
+                 (let [last-frame (atom nil)
+                       x (jsnes/create {:on-frame #(reset! last-frame (js/Uint32Array.from %))})]
+                   (emu/load-rom! x bytes)
+                   (emu/use-cpu! x which)
+                   {:emu x :frame last-frame :ms 0}))
+          runs (atom {:jsnes (make :jsnes) :cljs (make :cljs)})
+          run-frame! (fn [k]
+                       (let [{:keys [emu frame]} (@runs k)
+                             t0 (js/performance.now)]
+                         (emu/frame! emu)
+                         (swap! runs update-in [k :ms] + (- (js/performance.now) t0))
+                         (frame-hash @frame (.. ^js (:nes emu) -cpu -mem))))]
+      (swap! db assoc :cpu-compare {:running? true :frame 0 :of frames})
+      (letfn [(chunk [n]
+                (let [result (loop [i 0 n n]
+                               (cond
+                                 (= n frames) {:same-for n}
+                                 (= i 20) {:continue n}
+                                 :else (let [a (run-frame! :jsnes) b (run-frame! :cljs)]
+                                         (if (= a b) (recur (inc i) (inc n)) {:differs-at (inc n)}))))]
+                  (if-let [n (:continue result)]
+                    (do (swap! db assoc-in [:cpu-compare :frame] n)
+                        (js/setTimeout #(chunk n) 0))
+                    (let [{:keys [jsnes cljs]} @runs]
+                      (swap! db assoc :cpu-compare
+                             (merge result {:running? false :of frames
+                                            :jsnes-ms (:ms jsnes) :cljs-ms (:ms cljs)
+                                            :stats (emu/cpu-stats (:emu cljs))}))))))]
+        (chunk 0)))))
 
 (defn clear-code-log! []
   (when-let [e @emulator] (emu/clear-code-log! e)))
@@ -374,6 +433,7 @@
         (emu/monitor-bus! e @bus-monitor?)
         (emu/set-breakpoints! e (breakpoints))
         (emu/log-code! e @code-logging?)
+        (emu/use-cpu! e @cpu-choice)
         (reset! emulator e)
         (reset! bus-log [])
         (reset! bus-activity nil)

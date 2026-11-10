@@ -129,12 +129,21 @@ played. So combine them.
 
 ## Our own emulator core (Phase 3)
 
-- [ ] **6502 CPU in ClojureScript** behind the `Emulator` protocol, reusing
-  `nes.cpu.opcodes`
-- [ ] **Validate against `nestest.nes`** and its reference log (in `jsnes/roms/nestest`)
-- [ ] **Side-by-side mode** – run jsnes and our CPU in lockstep and stop at the first
-  difference
-- [ ] **Unofficial opcodes** in the opcode table and disassembler
+- [x] **6502 CPU in ClojureScript** – `nes.cpu.core`: the 151 official instructions, with
+  cycle counts and jsnes's exact bus accesses; swappable for jsnes's CPU inside the jsnes
+  emulator (CPU tab, `emu/use-cpu!`). jsnes still takes interrupts and unofficial opcodes
+- [x] **Validate against `nestest.nes`** – all 5,003 official-instruction lines of its log
+  match (registers, flags, cycles). The test is skipped where nestest isn't present (CI)
+- [x] **Side-by-side check** – the CPU tab's Compare runs both CPUs for 600 frames and checks
+  picture and RAM every frame: identical on all the games tried
+- [ ] **nestest in CI** – the ROM and log aren't in the repo (no clear license); fetch them in
+  CI, or add them with a note
+- [ ] **Interrupts in ClojureScript** – take NMI and IRQ in `nes.cpu.core` too, matching
+  jsnes's timing (when an NMI raised mid-instruction takes effect)
+- [ ] **Unofficial opcodes** in the opcode table, disassembler and `nes.cpu.core`
+- [ ] **Faster core** – the step function allocates closures per instruction; whole frames
+  run 1.0–1.2× jsnes's time now
+- [ ] **A ClojureScript PPU**, then a whole console behind the `Emulator` protocol
 
 ## Making games (Phases 4 and 5)
 

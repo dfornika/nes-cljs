@@ -122,6 +122,17 @@
     :chr-size :recording?}, or nil if nothing has been. The arrays are live:
     read them, don't change them."))
 
+(defprotocol CpuChoice
+  "Which 6502 runs the game. (The rest of the console stays the same.)"
+  (use-cpu! [emu which]
+    ":jsnes for jsnes's own CPU, :cljs for NES.cljs's ClojureScript one
+    (nes.cpu.core).")
+  (cpu-in-use [emu] ":jsnes or :cljs.")
+  (cpu-stats [emu]
+    "With the ClojureScript CPU: how many instructions each CPU has run,
+    {:cljs n :jsnes n} (jsnes still takes interrupts and unofficial
+    opcodes)."))
+
 (defprotocol Debug
   "Stopping the emulator when something happens. See nes.breakpoints."
   (set-breakpoints! [emu bps]
