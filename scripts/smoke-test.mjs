@@ -253,6 +253,7 @@ try {
                                                clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}));
     }, type);
     await touch('pointerdown');
+    await p.waitForSelector('.tp-on');   // the page redraws a moment after the touch
     const held = await p.locator('.tp-on').allTextContents();
     await touch('pointerup');
     check(held.includes('A'), `touch controller: shown on a phone, A presses (${held.join(' ')})`);
