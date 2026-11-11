@@ -7,6 +7,7 @@
             [nes.cpu.disasm :as disasm :refer [hex]]
             [nes.cpu.opcodes :as ops]
             [nes.cpu.reference :as ref]
+            [nes.debug-info :as debug-info]
             [nes.instructions-view :as instructions-view]
             [nes.emulator :as emu]
             [nes.state :refer [db]]))
@@ -67,8 +68,8 @@
 
 (defn- mnemonic-link
   "An instruction's assembly text, with its mnemonic linking to the
-  Instructions tab."
-  [{:keys [mnemonic] :as instr}]
+  Instructions tab. `name-of` names the addresses that have names."
+  [{:keys [mnemonic] :as instr} name-of]
   (if-not mnemonic
     [:span (disasm/text instr)]
     [:span
@@ -76,11 +77,16 @@
           :style {:color "#24292f" :text-decoration "underline dotted #8c959f"}
           :on-click (fn [e] (.preventDefault e) (instructions-view/show! mnemonic))}
       (str/upper-case (name mnemonic))]
-     (let [o (disasm/operand-text instr)] (when (seq o) (str " " o)))]))
+     (let [o (disasm/operand-text instr name-of)] (when (seq o) (str " " o)))]))
 
 (defn- code-listing [emulator pc regs]
   (let [peek #(emu/cpu-peek emulator %)
         instrs (disasm/disassemble peek pc 16)
+        ;; names for addresses: the game's own, if it was built here, and
+        ;; the hardware registers'
+        table (debug-info/table-for (get-in @db [:rom :sha1]))
+        name-of (debug-info/namer table)
+        labels? (some #(debug-info/label-at table (:addr %)) instrs)
         exec-bps (into {} (for [b (console/breakpoints)
                                 :when (and (= :exec (:kind b)) (nil? (:end b)))]
                             [(:addr b) b]))]
@@ -99,9 +105,19 @@
          [:td {:style (merge mono {:padding "1px 6px" :color "#0969da"})} (subs (hex addr 4) 1)]
          [:td {:style (merge mono muted {:padding "1px 6px" :white-space "pre"})}
           (.padEnd (apply str (interpose " " (map #(if % (subs (hex % 2) 1) "??") bytes))) 8)]
+         ;; the label on this address, in games that have them
+         (when labels?
+           [:td {:style (merge mono {:padding "1px 0 1px 6px" :text-align "right" :color "#8250df"
+                                     :white-space "nowrap"})}
+            (some-> (debug-info/label-at table addr) (str ":"))])
          [:td {:style (merge mono {:padding "1px 6px" :white-space "pre"})
-               :title (when mnemonic (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)))}
-          [mnemonic-link instr]]
+               :title (when mnemonic
+                        (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)
+                             ;; a name hides the number, so say it here
+                             (let [plain (disasm/operand-text instr)]
+                               (when (not= plain (disasm/operand-text instr name-of))
+                                 (str "\nThe address is " plain)))))}
+          [mnemonic-link instr name-of]]
          ;; one line each, so the listing keeps its height as the game runs
          [:td {:style {:padding "1px 6px" :color (if (zero? i) "#24292f" "#57606a")
                        :font-size "12px" :white-space "nowrap"}}

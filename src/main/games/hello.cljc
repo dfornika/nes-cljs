@@ -23,22 +23,26 @@
   (:require [gamedev-toolkit.asm :as asm]
             [gamedev-toolkit.chr :as chr]
             [gamedev-toolkit.hardware :as hw]
+            [gamedev-toolkit.memory :as memory]
             [gamedev-toolkit.rom :as rom]))
 
 ;; ---------------------------------------------------------------------------
-;; Memory: where the program keeps its variables
+;; Memory: the program's variables. The allocator picks their addresses
+;; (see gamedev-toolkit.memory); the code below only uses their names. The
+;; same declarations become the game's lens in the Lens tab, and the names
+;; in the CPU tab's disassembly.
 
-(def variables
-  {:frame        0x00   ; counts frames; the NMI handler adds 1
-   :buttons      0x01   ; buttons held down now (see hw/buttons)
-   :prev-buttons 0x02   ; ...and on the frame before
-   :pressed      0x03   ; buttons that went down this frame
-   :player-x     0x04
-   :player-y     0x05
-   :color        0x06   ; which of `backgrounds` to show
-   :oam          0x0200}) ; the shadow copy of sprite memory: 64 sprites x 4 bytes
-
-(def symbols (merge hw/registers variables))
+(def memory
+  (memory/allocate
+   [[:frame        :u8 {:doc "Counts frames; the NMI handler adds 1"}]
+    [:buttons      [:bits hw/button-bits] {:doc "Buttons held down now"}]
+    [:prev-buttons [:bits hw/button-bits] {:doc "...and on the frame before"}]
+    [:pressed      [:bits hw/button-bits] {:doc "Buttons that went down this frame"}]
+    [:player       {:x :u8, :y :u8}]
+    [:color        :u8 {:doc "Which of `backgrounds` to show"}]
+    ;; the shadow copy of sprite memory: 64 sprites x 4 bytes. It has to be
+    ;; a whole page, and $0200 is where everyone puts it.
+    [:oam          [:array 256 :u8] {:at 0x0200 :hide true}]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Graphics and colors
@@ -173,8 +177,8 @@
    [:bne :load-palettes]
 
    ;; Start in the middle of the screen.
-   [:lda [:imm 120]] [:sta :player-x]
-   [:lda [:imm 112]] [:sta :player-y]
+   [:lda [:imm 120]] [:sta :player/x]
+   [:lda [:imm 112]] [:sta :player/y]
 
    ;; NMI on. The NMI handler turns the picture on.
    [:lda [:imm 0x80]] [:sta :ppuctrl]])
@@ -208,10 +212,10 @@
    [:sta :pressed]])
 
 (def move-player
-  [(when-button :buttons :right [:inc :player-x])
-   (when-button :buttons :left  [:dec :player-x])
-   (when-button :buttons :down  [:inc :player-y])
-   (when-button :buttons :up    [:dec :player-y])
+  [(when-button :buttons :right [:inc :player/x])
+   (when-button :buttons :left  [:dec :player/x])
+   (when-button :buttons :down  [:inc :player/y])
+   (when-button :buttons :up    [:dec :player/y])
    (when-button :pressed :a     [:inc :color])])
 
 (def draw-player
@@ -222,10 +226,10 @@
   same few instructions four times with different numbers."
   (for [[i [tile dx dy]] (map-indexed vector face-sprites)
         :let [sprite [:+ :oam (* 4 i)]]]
-    [[:lda :player-y] [:clc] [:adc [:imm dy]] [:sta sprite]
+    [[:lda :player/y] [:clc] [:adc [:imm dy]] [:sta sprite]
      [:lda [:imm tile]]                       [:sta [:+ sprite 1]]
      [:lda [:imm 0]]                          [:sta [:+ sprite 2]]   ; sprite palette 0
-     [:lda :player-x] [:clc] [:adc [:imm dx]] [:sta [:+ sprite 3]]]))
+     [:lda :player/x] [:clc] [:adc [:imm dx]] [:sta [:+ sprite 3]]]))
 
 (def main
   [[:label :main]
@@ -281,10 +285,11 @@
 
 (defn build
   "Build the cartridge. Returns {:rom the .nes file's bytes, :name,
-  :labels, :listing, :symbols}."
+  :labels, :listing, :symbols, :memory}."
   []
   (assoc (rom/nrom {:code [reset main nmi irq data]
                     :vectors {:nmi :nmi :reset :reset :irq :irq}
-                    :symbols symbols
+                    :symbols hw/registers
+                    :memory memory
                     :chr (chr/bank tiles)})
          :name "hello.nes"))

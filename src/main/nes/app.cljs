@@ -24,7 +24,8 @@
             [nes.tiles-view :refer [tiles-view]]
             [games.hello :as hello]
             [nes.touchpad :as touchpad]
-            [nes.ui :as ui]))
+            [nes.ui :as ui]
+            [nes.workbench :as workbench]))
 
 (def sample-roms
   [{:name "Hello"
@@ -269,8 +270,7 @@
       [:button {:on-click (fn []
                             (hide-popover! "samples-menu")
                             (if build
-                              (let [built (build)]
-                                (console/load-bytes! (:name built) (js/Uint8Array.from (clj->js (:rom built)))))
+                              (workbench/play! (build))
                               (console/load-url! url)))
                 :style {:font-weight "bold"}}
        name]

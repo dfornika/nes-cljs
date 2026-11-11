@@ -66,8 +66,9 @@ committed to; pick whatever looks fun.
 - [ ] **Breakpoint follow-ups** – remember them per ROM; stop on NMI / IRQ; stop on a PPU
   register write at a given scanline; log instead of stopping (tracepoints)
 - [ ] **Step over / step out / run to line** in the disassembly
-- [ ] **Symbolic disassembly** – show `STA PPUCTRL` instead of `STA $2000`, and let
-  users name addresses
+- [x] **Symbolic disassembly** – `STA PPUCTRL` instead of `STA $2000` for every game (hover
+  for the number); games built here also show their own variables and labels
+- [ ] **Name addresses yourself** – in any game, from the page or the REPL; kept per ROM
 - [ ] **Trace log** – record every instruction for N frames; search and diff it
 - [ ] **Memory editing and freezing** – poke values, lock a byte (like a Game Genie)
 - [ ] **Save states and rewind** – jsnes has `toJSON`/`fromJSON`; a timeline of
@@ -165,9 +166,14 @@ move to its own repository once its API settles. Games are in
   ClojureScript; in the Sample ROMs menu, assembled in the page
 - [x] **Run routines without a console** – `nes.cpu.harness/run-routine`: assembled code
   on the ClojureScript CPU in `npm test`, with cycle counts
-- [ ] **Memory and symbols** (next) – a `defvars` allocator that places variables and
-  emits the game's lens and labels: `STA player-x` in the disassembly, breakpoints by name
-- [ ] **Generators and subroutines** – `add16`, `times`, `defsub`; what each clobbers,
+- [x] **Memory and symbols** – `gamedev-toolkit.memory/allocate`: declare variables as data
+  (`:u8`, `:u16`, enums, bits, arrays, structs, structures of arrays) and it places them, zero
+  page first. A built game brings a "Variables" lens and its names (`nes.debug-info`,
+  `nes.workbench`): `STA player.x` and `main:` in the CPU tab, breakpoints by name,
+  `(rd :player/x)` `(break! :main)` `(dis :nmi)` `(syms)` at the REPL
+- [ ] **Memory follow-ups** – fixed-point types; put the most-used variables in the zero page
+  (count uses in the code); show `:doc` in the Lens tab; a memory map of what's allocated
+- [ ] **Generators and subroutines** (next) – `add16`, `times`, `defsub`; what each clobbers,
   as data; property tests (test.check) against plain Clojure functions
 - [ ] **Runtime skeleton** – reset/init, NMI handler, controller, sprite buffer, a queue of
   video memory writes, the state machine; then a first real game (single screen)

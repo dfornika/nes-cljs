@@ -128,6 +128,15 @@ try {
       await page.keyboard.up('ArrowRight');
       check(true, `Hello: holding Right moves the face (x ${x0} → ${x1})`);
     });
+    if (rom === 'Hello') await step('Hello brings its names', async () => {
+      // A game built here knows its variables and labels: they're a lens,
+      // and the disassembly uses them.
+      await page.click('button:text-is("Lens")');
+      await page.waitForSelector('td:text-is("player")');
+      await page.click('button:text-is("CPU")');
+      await page.waitForSelector('text=wait-for-frame');
+      check(true, 'Hello: its variables are a lens, and the disassembly shows its names');
+    });
   }
 
   await step('emulation runs', async () => {

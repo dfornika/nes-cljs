@@ -5,6 +5,7 @@
   (:require [reagent.core :as r]
             [nes.breakpoints :as bp]
             [nes.console :as console]
+            [nes.debug-info :as debug-info]
             [nes.state :refer [db]]))
 
 (def ^:private mono {:font-family "ui-monospace, Menlo, Consolas, monospace"})
@@ -38,8 +39,11 @@
   (let [form (r/atom {:kind "write" :addr "" :end "" :value ""})]
     (fn []
       (let [{:keys [kind addr end value]} @form
-            a (bp/parse-addr addr)
-            e (when (seq end) (bp/parse-addr end))
+            ;; an address, or in a game that has them, a name (main, player.x)
+            table (debug-info/table-for (get-in @db [:rom :sha1]))
+            parse #(or (debug-info/address table (.trim (str %))) (bp/parse-addr %))
+            a (parse addr)
+            e (when (seq end) (parse end))
             v (when (seq value) (bp/parse-addr value))
             valid? (and a (or (empty? end) (and e (>= e a)))
                         (or (empty? value) (and v (< v 256))))
@@ -61,7 +65,7 @@
          "Stop on"
          [:select {:value kind :on-change #(swap! form assoc :kind (.. % -target -value))}
           (for [k bp/kinds] ^{:key k} [:option {:value (name k)} (bp/kind-names k)])]
-         "of" [input :addr "$addr" "64px"]
+         "of" [input :addr (if table "$addr or name" "$addr") (if table "110px" "64px")]
          "to" [input :end "(end)" "64px"]
          (when (not= kind "exec")
            [:<> "value" [input :value "(any)" "48px"]])
@@ -84,7 +88,11 @@
                           :on-change #(console/update-breakpoint! id update :enabled? not)}]]
             [:td {:style (merge mono {:padding "1px 10px 1px 4px"
                                       :color (if enabled? "#24292f" "#8c959f")})}
-             (bp/describe b)]
+             (bp/describe b)
+             ;; what the game calls that address, if anything
+             (when-let [n (debug-info/name-at (debug-info/table-for (get-in @db [:rom :sha1])) (:addr b)
+                                              (= :write (:kind b)))]
+               [:span {:style {:color "#8250df"}} " " n])]
             [:td {:style (merge muted {:padding "1px 10px"})}
              (when (pos? hits) (str hits (if (= 1 hits) " hit" " hits")))]
             [:td [:button {:on-click #(console/remove-breakpoint! id) :title "Remove"} "×"]]])]])

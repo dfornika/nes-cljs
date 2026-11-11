@@ -4,9 +4,12 @@ Notes from a conversation about where NES.cljs could go: writing an NES
 game in ClojureScript and building it into a `.nes` ROM that runs here or
 in any other emulator. This is thinking out loud, to come back to.
 
-Built so far (see "Making games" in `TODO.md`): layer 1, as the
+Built so far (see "Making games" in `TODO.md`): layers 1 and 4, as the
 `gamedev-toolkit` library (`src/main/gamedev_toolkit`), and the first
-milestone, `src/main/games/hello.cljc`.
+milestone, `src/main/games/hello.cljc`. Two things came out differently
+from the sketches below: instructions are written `[:lda [:imm 0x10]]`
+(the operand's shape picks the addressing mode), and `defvars` is a plain
+function, `memory/allocate`, whose struct fields are named `:player/x`.
 
 ## The question
 

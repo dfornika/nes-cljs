@@ -53,9 +53,9 @@
 (deftest runs
   (let [{:keys [labels] :as built} (hello/build)
         {:keys [^js mem] :as m} (boot built)
-        v hello/variables]
+        v (:symbols hello/memory)]
     (testing "after RESET"
-      (is (= [120 112] [(aget mem (:player-x v)) (aget mem (:player-y v))]))
+      (is (= [120 112] [(aget mem (:player/x v)) (aget mem (:player/y v))]))
       (is (every? #(= 0xFF (aget mem (+ 0x200 %))) (range 256)) "all sprites hidden")
       (is (= 0x80 (aget mem 0x2000)) "NMI is on"))
     (testing "a frame with nothing pressed draws the face where it started"
@@ -76,4 +76,4 @@
       (is (= 0 (aget mem (:pressed v))))
       (is (= 1 (aget mem (:color v))))
       ;; left and right together cancel out, as do up and down
-      (is (= [120 112] [(aget mem (:player-x v)) (aget mem (:player-y v))])))))
+      (is (= [120 112] [(aget mem (:player/x v)) (aget mem (:player/y v))])))))

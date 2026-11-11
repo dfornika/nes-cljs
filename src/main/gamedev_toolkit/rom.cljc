@@ -54,20 +54,25 @@
     :code       the program (see gamedev-toolkit.asm)
     :vectors    {:nmi label :reset label :irq label}
     :symbols    names for addresses, as for asm/assemble
+    :memory     the game's variables, from gamedev-toolkit.memory/allocate:
+                their names are added to the symbols
     :chr        8 KB of CHR ROM (see gamedev-toolkit.chr/bank)
     :prg-size   16384 (default) or 32768
     :mirroring  as for `ines`
 
   Returns {:rom the .nes file's bytes, :prg just the program,
-  :labels, :listing (from the assembler), :symbols}."
-  [{:keys [code vectors symbols chr prg-size mirroring]
+  :labels, :listing (from the assembler), :symbols, :memory}."
+  [{:keys [code vectors symbols memory chr prg-size mirroring]
     :or {prg-size prg-bank-size symbols {} mirroring :horizontal}}]
   (when-not (#{16384 32768} prg-size)
     (throw (ex-info "An NROM cartridge has 16384 or 32768 bytes of PRG ROM" {:prg-size prg-size})))
   (doseq [v [:nmi :reset :irq]]
     (when-not (get vectors v)
       (throw (ex-info (str "No " v " in :vectors. The CPU needs all three: :nmi, :reset and :irq.") {}))))
-  (let [{:keys [bytes labels listing]}
+  (when-let [clash (some #(when (contains? symbols %) %) (keys (:symbols memory)))]
+    (throw (ex-info (str clash " is both a variable and one of the :symbols") {:name clash})))
+  (let [symbols (merge symbols (:symbols memory))
+        {:keys [bytes labels listing]}
         (asm/assemble [code
                        [:org 0xFFFA]
                        [:dw (:nmi vectors) (:reset vectors) (:irq vectors)]]
@@ -76,4 +81,5 @@
      :prg bytes
      :labels labels
      :listing listing
-     :symbols symbols}))
+     :symbols symbols
+     :memory memory}))
