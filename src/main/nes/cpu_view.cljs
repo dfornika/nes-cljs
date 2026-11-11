@@ -79,50 +79,95 @@
       (str/upper-case (name mnemonic))]
      (let [o (disasm/operand-text instr name-of)] (when (seq o) (str " " o)))]))
 
-(defn- code-listing [emulator pc regs]
+(defn- th
+  "A column heading: short, with the long version as a tooltip."
+  [label title]
+  [:th {:title title
+        :style (merge muted {:padding "1px 6px 3px" :font-size "11px" :font-weight "normal"
+                             :text-align "left" :white-space "nowrap"
+                             :text-transform "uppercase" :letter-spacing "0.04em"
+                             :border-bottom "1px solid #d0d7de"
+                             :cursor (when (seq title) "help")})}
+   label])
+
+(defn- code-listing
+  "The code around the program counter: the last few instructions stepped
+  through, the one about to run (highlighted), and what comes after it in
+  memory."
+  [emulator pc regs]
   (let [peek #(emu/cpu-peek emulator %)
         instrs (disasm/disassemble peek pc 16)
+        done @console/recent-steps
         ;; names for addresses: the game's own, if it was built here, and
         ;; the hardware registers'
         table (debug-info/table-for (get-in @db [:rom :sha1]))
         name-of (debug-info/namer table)
-        labels? (some #(debug-info/label-at table (:addr %)) instrs)
+        labels? (some #(debug-info/label-at table (:addr %)) (concat done instrs))
         exec-bps (into {} (for [b (console/breakpoints)
                                 :when (and (= :exec (:kind b)) (nil? (:end b)))]
-                            [(:addr b) b]))]
+                            [(:addr b) b]))
+        ;; `state` is :done (already run), :next (about to run) or :later
+        row (fn [k {:keys [addr bytes mnemonic mode] :as instr} state]
+              ^{:key k}
+              [:tr {:style {:background (when (= state :next) "#fff8c5")
+                            :opacity (when (= state :done) 0.6)}}
+               (let [b (exec-bps addr)]
+                 [:td {:style {:padding "1px 2px 1px 6px" :width "12px" :cursor "pointer"
+                               :color (if (and b (:enabled? b)) "#cf222e" "#d0d7de")}
+                       :title (if b "Remove the breakpoint here" "Stop before running this instruction")
+                       :on-click #(console/toggle-exec-breakpoint! addr)}
+                  "●"])
+               [:td {:style (merge muted {:padding "1px 6px 1px 2px" :width "14px"})
+                     :title (case state :next "Runs next" :done "Already run" nil)}
+                (case state :next [:span {:style {:color "#24292f"}} "▶"] :done "✓" nil)]
+               [:td {:style (merge mono {:padding "1px 6px" :color "#0969da"})} (subs (hex addr 4) 1)]
+               [:td {:style (merge mono muted {:padding "1px 6px" :white-space "pre"})}
+                (.padEnd (apply str (interpose " " (map #(if % (subs (hex % 2) 1) "??") bytes))) 8)]
+               ;; the label on this address, in games that have them
+               (when labels?
+                 [:td {:style (merge mono {:padding "1px 0 1px 6px" :text-align "right" :color "#8250df"
+                                           :white-space "nowrap"})}
+                  (some-> (debug-info/label-at table addr) (str ":"))])
+               [:td {:style (merge mono {:padding "1px 6px" :white-space "pre"})
+                     :title (when mnemonic
+                              (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)
+                                   ;; a name hides the number, so say it here
+                                   (let [plain (disasm/operand-text instr)]
+                                     (when (not= plain (disasm/operand-text instr name-of))
+                                       (str "\nThe address is " plain)))))}
+                [mnemonic-link instr name-of]]
+               ;; one line each, so the listing keeps its height as the game runs
+               [:td {:style {:padding "1px 6px" :color (if (= state :next) "#24292f" "#57606a")
+                             :font-size "12px" :white-space "nowrap"}}
+                ;; the instruction about to run, with the actual addresses and values
+                (ref/explain instr (when (= state :next) {:regs regs :peek peek}))]])
+        blanks (- console/recent-steps-kept (count done))]
     [:table {:style {:border-collapse "collapse" :font-size "13px"}}
+     [:thead
+      [:tr
+       [th "" ""]
+       [th "" ""]
+       [th "Addr" "Address: where in memory the instruction is. The highlighted row's address is the program counter (PC)."]
+       [th "Bytes" (str "The instruction as it sits in memory. The first byte is the opcode: which instruction, and how it "
+                        "finds its data. Then 0, 1 or 2 operand bytes; a 2-byte operand is an address, low byte first.")]
+       (when labels?
+         [th "Label" "The name the game's source gives this address."])
+       [th "Instruction" (str "The same bytes written as assembly: the mnemonic (click it for details), then the operand. "
+                              "A name in the operand stands for an address; hover over it for the number.")]
+       [th "What it does" "In plain English. For the instruction about to run, with the actual addresses and values."]]]
      [:tbody
-      (for [[i {:keys [addr bytes mnemonic mode] :as instr}] (map-indexed vector instrs)]
-        ^{:key i}
-        [:tr {:style {:background (when (zero? i) "#fff8c5")}}
-         (let [b (exec-bps addr)]
-           [:td {:style {:padding "1px 2px 1px 6px" :width "12px" :cursor "pointer"
-                         :color (if (and b (:enabled? b)) "#cf222e" "#d0d7de")}
-                 :title (if b "Remove the breakpoint here" "Stop before running this instruction")
-                 :on-click #(console/toggle-exec-breakpoint! addr)}
-            "●"])
-         [:td {:style {:padding "1px 6px 1px 2px" :width "14px"}} (when (zero? i) "▶")]
-         [:td {:style (merge mono {:padding "1px 6px" :color "#0969da"})} (subs (hex addr 4) 1)]
-         [:td {:style (merge mono muted {:padding "1px 6px" :white-space "pre"})}
-          (.padEnd (apply str (interpose " " (map #(if % (subs (hex % 2) 1) "??") bytes))) 8)]
-         ;; the label on this address, in games that have them
-         (when labels?
-           [:td {:style (merge mono {:padding "1px 0 1px 6px" :text-align "right" :color "#8250df"
-                                     :white-space "nowrap"})}
-            (some-> (debug-info/label-at table addr) (str ":"))])
-         [:td {:style (merge mono {:padding "1px 6px" :white-space "pre"})
-               :title (when mnemonic
-                        (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)
-                             ;; a name hides the number, so say it here
-                             (let [plain (disasm/operand-text instr)]
-                               (when (not= plain (disasm/operand-text instr name-of))
-                                 (str "\nThe address is " plain)))))}
-          [mnemonic-link instr name-of]]
-         ;; one line each, so the listing keeps its height as the game runs
-         [:td {:style {:padding "1px 6px" :color (if (zero? i) "#24292f" "#57606a")
-                       :font-size "12px" :white-space "nowrap"}}
-          ;; the instruction about to run, with the actual addresses and values
-          (ref/explain instr (when (zero? i) {:regs regs :peek peek}))]])]]))
+      ;; Room for the instructions stepped through is always there, so the
+      ;; highlighted row doesn't move down as it fills.
+      (for [i (range blanks)]
+        ^{:key (str "blank" i)}
+        [:tr [:td {:col-span (if labels? 7 6)
+                   :style (merge muted {:padding "1px 6px 1px 34px" :font-size "12px" :font-style "italic"
+                                        :line-height "19px"})}
+              (if (and (empty? done) (= i (dec blanks)))
+                "Instructions you step through stay here."
+                "\u00A0")]])
+      (map-indexed (fn [i instr] (row (str "done" i) instr :done)) done)
+      (map-indexed (fn [i instr] (row i instr (if (zero? i) :next :later))) instrs)]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Stack and vectors
@@ -142,42 +187,68 @@
            :target (bit-or (emu/cpu-peek emulator (inc jsr-at))
                            (bit-shift-left (emu/cpu-peek emulator (+ 2 jsr-at)) 8))})))))
 
-(defn- stack-view [emulator sp]
-  (let [top (+ 0x101 sp)]
-    (if (> top 0x1FF)
-      [:div {:style (merge muted {:height "262px"})} "Empty."]
-      [:div
-       [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px" :max-width "340px"})}
-        "The stack is RAM at $0100-$01FF, filled from the top down: JSR saves where to come back to "
-        "here (2 bytes), and PHA saves A. Newest first:"]
-       ;; a fixed height (room for 12 rows), so what's below doesn't jump
-       ;; around as the stack grows and shrinks
-       [:div {:style {:height "220px" :overflow "hidden"}}
-        [:table {:style {:font-size "13px" :border-collapse "collapse"}}
-         [:tbody
+(defn- stack-view
+  "The stack, newest first, under a row showing where the stack pointer
+  is. `table` (a game's symbol table, or nil) names the routines that
+  return addresses belong to."
+  [emulator sp table]
+  (let [top (+ 0x101 sp)
+        used (- 0xFF sp)
+        cell (merge mono {:padding "1px 8px 1px 6px"})
+        byte-at #(subs (hex (emu/cpu-peek emulator %) 2) 1)
+        named (fn [addr]
+                (if-let [n (debug-info/name-at table addr)]
+                  [:span [:span {:style (merge mono {:color "#8250df"})} n] " (" (hex addr 4) ")"]
+                  [:span {:style mono} (hex addr 4)]))]
+    [:div
+     [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px" :max-width "340px"})}
+      "The stack is RAM at $0100-$01FF, filled from the top down. JSR saves where to come back "
+      "to (2 bytes), PHA saves A, and an interrupt saves where it interrupted and the flags (3 bytes)."]
+     ;; a fixed height (room for 12 rows), so what's below doesn't jump
+     ;; around as the stack grows and shrinks
+     [:div {:style {:height "244px" :overflow "hidden"}}
+      [:table {:style {:font-size "13px" :border-collapse "collapse"}}
+       [:thead
+        [:tr
+         [th "Addr" "Address in the stack's page of RAM, $0100-$01FF. Newest at the top of this list."]
+         [th "Value" "The byte (or the two bytes of a return address) saved there."]
+         [th "What it is" "A guess, for pairs of bytes that look like a return address saved by JSR."]]]
+       [:tbody
+        ;; where the stack pointer points: the first free byte
+        ^{:key "sp"}
+        [:tr {:style {:background "#f6f8fa"}}
+         [:td {:style (merge cell muted)} (subs (hex (+ 0x100 sp) 4) 1)]
+         [:td {:style (merge cell muted)} "··"]
+         [:td {:style {:font-size "12px" :white-space "nowrap"}}
+          "← SP (" (hex sp 2) "): the next byte saved goes here"]]
+        (if (zero? used)
+          ^{:key "empty"}
+          [:tr [:td {:col-span 3 :style (merge muted {:padding "1px 6px" :font-size "12px"})}
+                "Nothing is saved on the stack."]]
           (loop [a top rows [] n 0]
-            (if (or (> a 0x1FF) (= n 12))
-              (seq (cond-> rows (<= a 0x1FF) (conj ^{:key "more"} [:tr [:td {:style muted} "…"]])))
+            (if (or (> a 0x1FF) (= n 11))
+              (seq (cond-> rows (<= a 0x1FF) (conj ^{:key "more"} [:tr [:td {:style (merge cell muted)} "…"]])))
               (if-let [{:keys [returns-to jsr-at target]} (when (< a 0x1FF) (return-address emulator a))]
                 (recur (+ a 2)
                        (conj rows
                              ^{:key a}
                              [:tr
-                              [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1) "–" (subs (hex (inc a) 4) 3)]
-                              [:td {:style (merge mono {:padding "1px 8px 1px 0"})}
-                               (subs (hex (emu/cpu-peek emulator a) 2) 1) " " (subs (hex (emu/cpu-peek emulator (inc a)) 2) 1)]
-                              [:td {:style {:font-size "12px"}}
-                               "return address: back to " [:span {:style mono} (hex returns-to 4)]
-                               [:span {:style muted} " (after the call to " (hex target 4) " at " (hex jsr-at 4) ")"]]])
+                              [:td {:style (merge cell muted)} (subs (hex a 4) 1) "–" (subs (hex (inc a) 4) 3)]
+                              [:td {:style cell} (byte-at a) " " (byte-at (inc a))]
+                              [:td {:style {:font-size "12px" :white-space "nowrap"}}
+                               "return to " [:span {:style mono} (hex returns-to 4)]
+                               [:span {:style muted} ", after the call to " (named target)]]])
                        (inc n))
                 (recur (inc a)
                        (conj rows
                              ^{:key a}
                              [:tr
-                              [:td {:style (merge mono muted {:padding "1px 8px 1px 0"})} (subs (hex a 4) 1)]
-                              [:td {:style (merge mono {:padding "1px 8px 1px 0"})} (subs (hex (emu/cpu-peek emulator a) 2) 1)]
+                              [:td {:style (merge cell muted)} (subs (hex a 4) 1)]
+                              [:td {:style cell} (byte-at a)]
                               [:td]])
-                       (inc n)))))]]]])))
+                       (inc n))))))]]]
+     [:div {:style (merge muted {:font-size "12px"})}
+      used " of 256 bytes in use"]]))
 
 (defn- word-at [emulator addr]
   (let [lo (emu/cpu-peek emulator addr) hi (emu/cpu-peek emulator (inc addr))]
@@ -280,12 +351,12 @@
         "Frame " frame " · scanline " scanline " · dot " dot " · CPU cycle " cycles
         (when (<= 241 scanline 260) " · in vertical blank")]
        [:div {:style {:display "flex" :gap "32px" :flex-wrap "wrap"}}
-        [section "Next instructions"
+        [section "Instructions"
          [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px"})}
           "The highlighted one runs next. Click an instruction's name for what it does, or a ● to stop there."]
          [code-listing emulator pc regs]]
         [:div
-         [section "Stack" [stack-view emulator sp]]
+         [section "Stack" [stack-view emulator sp (debug-info/table-for (get-in @db [:rom :sha1]))]]
          [section "Interrupt vectors" [vector-table emulator]]]]
        [section "Breakpoints" [breakpoints-panel]]])
     [:p {:style muted} "Load a ROM to see the CPU."]))

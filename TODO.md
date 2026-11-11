@@ -65,6 +65,12 @@ committed to; pick whatever looks fun.
   and Lens tabs; `break!` / `breaks` / `unbreak!` / `why` / `continue!`
 - [ ] **Breakpoint follow-ups** – remember them per ROM; stop on NMI / IRQ; stop on a PPU
   register write at a given scanline; log instead of stopping (tracepoints)
+- [x] **CPU tab: column headings** (with tooltips), **the last 3 instructions stepped through**
+  stay above the highlighted one, and the stack shows where SP points and how full it is
+- [ ] **Know what each stack byte is** – track JSR / PHA / PHP / interrupts as they push, so the
+  stack view can say "A, saved by PHA at $C135" or "interrupted at $C12E" instead of guessing
+- [ ] **A longer history** – the last few instructions before a breakpoint or pause too (needs
+  the emulator to keep a short trace while running)
 - [ ] **Step over / step out / run to line** in the disassembly
 - [x] **Symbolic disassembly** – `STA PPUCTRL` instead of `STA $2000` for every game (hover
   for the number); games built here also show their own variables and labels
