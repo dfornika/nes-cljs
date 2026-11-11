@@ -125,9 +125,11 @@
                 (.padEnd (apply str (interpose " " (map #(if % (subs (hex % 2) 1) "??") bytes))) 8)]
                ;; the label on this address, in games that have them
                (when labels?
-                 [:td {:style (merge mono {:padding "1px 0 1px 6px" :text-align "right" :color "#8250df"
-                                           :white-space "nowrap"})}
-                  (some-> (debug-info/label-at table addr) (str ":"))])
+                 (let [doc (debug-info/doc-at table addr)]
+                   [:td {:title doc   ; a subroutine's description, from the game's source
+                         :style (merge mono {:padding "1px 0 1px 6px" :text-align "right" :color "#8250df"
+                                             :white-space "nowrap" :cursor (when doc "help")})}
+                    (some-> (debug-info/label-at table addr) (str ":"))]))
                [:td {:style (merge mono {:padding "1px 6px" :white-space "pre"})
                      :title (when mnemonic
                               (str (get-in ops/modes [mode :name]) ": " (ref/mode-notes mode)

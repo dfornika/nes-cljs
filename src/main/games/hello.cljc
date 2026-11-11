@@ -19,12 +19,18 @@
     second, when it has finished drawing a frame ('vertical blank'). Only
     then is it safe to change what's on screen, so the NMI handler copies
     the shadow sprites to the PPU and changes any colors, quickly, before
-    drawing starts again."
-  (:require [gamedev-toolkit.asm :as asm]
-            [gamedev-toolkit.chr :as chr]
+    drawing starts again.
+
+  The code is written at three levels: single instructions
+  ([:sta :ppuctrl]), code generators (functions that return instructions,
+  from gamedev-toolkit.gen or defined here), and subroutines (code that
+  lives in one place in the ROM and is called: gamedev-toolkit.sub)."
+  (:require [gamedev-toolkit.chr :as chr]
+            [gamedev-toolkit.gen :as gen]
             [gamedev-toolkit.hardware :as hw]
             [gamedev-toolkit.memory :as memory]
-            [gamedev-toolkit.rom :as rom]))
+            [gamedev-toolkit.rom :as rom]
+            [gamedev-toolkit.sub :as sub :refer [call]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Memory: the program's variables. The allocator picks their addresses
@@ -97,13 +103,11 @@
 
 (defn wait-for-vblank
   "Wait until the PPU starts a vertical blank. BIT copies bit 7 of
-  PPUSTATUS (the 'in vertical blank' bit) to the N flag, and BPL loops
-  while N is clear."
+  PPUSTATUS (the 'in vertical blank' bit) to the negative flag; keep doing
+  that while it's clear ('positive')."
   []
-  (let [wait (asm/genlabel "wait")]
-    [[:label wait]
-     [:bit :ppustatus]
-     [:bpl wait]]))
+  (gen/do-while :positive
+    [:bit :ppustatus]))
 
 (defn set-video-address
   "Point PPUADDR at a video memory address: high byte, then low."
@@ -112,14 +116,12 @@
    [:lda [:imm [:lo addr]]] [:sta :ppuaddr]])
 
 (defn when-button
-  "Run `body` if `button` (:a, :left...) is set in the variable `in`."
+  "Run `body` if `button` (:a, :left...) is set in the variable `in`.
+  AND leaves only that button's bit, so the result is zero if it's up."
   [in button & body]
-  (let [skip (asm/genlabel "skip")]
-    [[:lda in]
-     [:and [:imm (hw/buttons button)]]
-     [:beq skip]
-     body
-     [:label skip]]))
+  [[:lda in]
+   [:and [:imm (hw/buttons button)]]
+   (gen/when-flag :not-zero body)])
 
 ;; ---------------------------------------------------------------------------
 ;; The program
@@ -148,23 +150,16 @@
 
    ;; Sprites can't be turned off one by one, but a sprite with a Y of
    ;; 240 or more is off the bottom of the screen. Hide all 64.
-   [:lda [:imm 0xFF]]
-   [:label :hide-sprites]
-   [:sta :oam :x]
-   [:inx]
-   [:bne :hide-sprites]
+   (gen/fill :oam 256 [:imm 0xFF])
 
    (wait-for-vblank)
 
    ;; Fill the background (1024 bytes: 4 x 256) with tile 0.
    (set-video-address (:nametable-0 hw/video))
-   [:ldy [:imm 4]]                      ; A and X are both 0 here
-   [:label :clear-background]
-   [:sta :ppudata]
-   [:inx]
-   [:bne :clear-background]
-   [:dey]
-   [:bne :clear-background]
+   [:lda [:imm 0]]
+   (gen/times 4 {:with :y}
+     (gen/times 256
+       [:sta :ppudata]))
 
    ;; Copy the 32 palette colors to video memory.
    (set-video-address (:palettes hw/video))
@@ -177,14 +172,16 @@
    [:bne :load-palettes]
 
    ;; Start in the middle of the screen.
-   [:lda [:imm 120]] [:sta :player/x]
-   [:lda [:imm 112]] [:sta :player/y]
+   (gen/move :player/x [:imm 120])
+   (gen/move :player/y [:imm 112])
 
    ;; NMI on. The NMI handler turns the picture on.
    [:lda [:imm 0x80]] [:sta :ppuctrl]])
 
 (def read-controller
-  "Read controller 1 into :buttons, and work out :pressed.
+  (sub/sub
+   :read-controller
+   "Read controller 1 into :buttons, and work out :pressed.
 
   Writing 1 then 0 to JOY1 makes the controller take a snapshot of its
   buttons. Each read of JOY1 then gives the next button in bit 0: A, B,
@@ -193,49 +190,53 @@
 
   The loop needs no counter: :buttons starts as 1, and when that 1 has
   been pushed all the way out of the left side (after 8 ROLs), it lands in
-  the carry flag and BCC stops looping."
-  [[:lda :buttons] [:sta :prev-buttons]
-   [:lda [:imm 1]]
-   [:sta :joy1]
-   [:sta :buttons]
-   [:lsr :a]                            ; A = 0
-   [:sta :joy1]
-   [:label :read-button]
-   [:lda :joy1]
-   [:lsr :a]
-   [:rol :buttons]
-   [:bcc :read-button]
-   ;; pressed = held now, and not held before
-   [:lda :prev-buttons]
-   [:eor [:imm 0xFF]]
-   [:and :buttons]
-   [:sta :pressed]])
+  the carry flag and the loop stops."
+   [(gen/move :prev-buttons :buttons)
+    [:lda [:imm 1]]
+    [:sta :joy1]
+    [:sta :buttons]
+    [:lsr :a]                           ; A = 0
+    [:sta :joy1]
+    (gen/do-while :no-carry
+      [:lda :joy1]
+      [:lsr :a]
+      [:rol :buttons])
+    ;; pressed = held now, and not held before
+    [:lda :prev-buttons]
+    [:eor [:imm 0xFF]]
+    [:and :buttons]
+    [:sta :pressed]]))
 
 (def move-player
-  [(when-button :buttons :right [:inc :player/x])
-   (when-button :buttons :left  [:dec :player/x])
-   (when-button :buttons :down  [:inc :player/y])
-   (when-button :buttons :up    [:dec :player/y])
-   (when-button :pressed :a     [:inc :color])])
+  (sub/sub
+   :move-player
+   "Move the player with the D-pad; A steps to the next background color."
+   [(when-button :buttons :right [:inc :player/x])
+    (when-button :buttons :left  [:dec :player/x])
+    (when-button :buttons :down  [:inc :player/y])
+    (when-button :buttons :up    [:dec :player/y])
+    (when-button :pressed :a     [:inc :color])]))
 
 (def draw-player
-  "Write the face's four sprites to the shadow sprite memory. A sprite is
+  (sub/sub
+   :draw-player
+   "Write the face's four sprites to the shadow sprite memory. A sprite is
   4 bytes: Y, tile number, attributes (palette, flipping), X.
 
   The `for` runs when the ROM is built, not on the NES: it writes out the
   same few instructions four times with different numbers."
-  (for [[i [tile dx dy]] (map-indexed vector face-sprites)
-        :let [sprite [:+ :oam (* 4 i)]]]
-    [[:lda :player/y] [:clc] [:adc [:imm dy]] [:sta sprite]
-     [:lda [:imm tile]]                       [:sta [:+ sprite 1]]
-     [:lda [:imm 0]]                          [:sta [:+ sprite 2]]   ; sprite palette 0
-     [:lda :player/x] [:clc] [:adc [:imm dx]] [:sta [:+ sprite 3]]]))
+   (for [[i [tile dx dy]] (map-indexed vector face-sprites)
+         :let [sprite [:+ :oam (* 4 i)]]]
+     [[:lda :player/y] [:clc] [:adc [:imm dy]] [:sta sprite]
+      [:lda [:imm tile]]                       [:sta [:+ sprite 1]]
+      [:lda [:imm 0]]                          [:sta [:+ sprite 2]]   ; sprite palette 0
+      [:lda :player/x] [:clc] [:adc [:imm dx]] [:sta [:+ sprite 3]]])))
 
 (def main
   [[:label :main]
-   read-controller
-   move-player
-   draw-player
+   (call read-controller)
+   (call move-player)
+   (call draw-player)
    ;; Wait until the NMI handler has counted another frame.
    [:lda :frame]
    [:label :wait-for-frame]
@@ -285,7 +286,7 @@
 
 (defn build
   "Build the cartridge. Returns {:rom the .nes file's bytes, :name,
-  :labels, :listing, :symbols, :memory}."
+  :labels, :listing, :symbols, :memory, :subroutines}."
   []
   (assoc (rom/nrom {:code [reset main nmi irq data]
                     :vectors {:nmi :nmi :reset :reset :irq :irq}

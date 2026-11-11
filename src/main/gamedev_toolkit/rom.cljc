@@ -17,7 +17,8 @@
     $FFFA  NMI    where to go at the start of each vertical blank
     $FFFC  RESET  where to start at power on and reset
     $FFFE  IRQ    where to go on an interrupt request"
-  (:require [gamedev-toolkit.asm :as asm]))
+  (:require [gamedev-toolkit.asm :as asm]
+            [gamedev-toolkit.sub :as sub]))
 
 (def prg-bank-size 16384)
 (def chr-bank-size 8192)
@@ -51,7 +52,8 @@
 (defn nrom
   "Assemble a program and pack it into an NROM cartridge.
 
-    :code       the program (see gamedev-toolkit.asm)
+    :code       the program (see gamedev-toolkit.asm). Subroutines it calls
+                (see gamedev-toolkit.sub) are put after it
     :vectors    {:nmi label :reset label :irq label}
     :symbols    names for addresses, as for asm/assemble
     :memory     the game's variables, from gamedev-toolkit.memory/allocate:
@@ -61,7 +63,8 @@
     :mirroring  as for `ines`
 
   Returns {:rom the .nes file's bytes, :prg just the program,
-  :labels, :listing (from the assembler), :symbols, :memory}."
+  :labels, :listing (from the assembler), :symbols, :memory,
+  :subroutines [{:name :doc} ...]}."
   [{:keys [code vectors symbols memory chr prg-size mirroring]
     :or {prg-size prg-bank-size symbols {} mirroring :horizontal}}]
   (when-not (#{16384 32768} prg-size)
@@ -72,6 +75,7 @@
   (when-let [clash (some #(when (contains? symbols %) %) (keys (:symbols memory)))]
     (throw (ex-info (str clash " is both a variable and one of the :symbols") {:name clash})))
   (let [symbols (merge symbols (:symbols memory))
+        {:keys [code subroutines]} (sub/link code)
         {:keys [bytes labels listing]}
         (asm/assemble [code
                        [:org 0xFFFA]
@@ -82,4 +86,5 @@
      :labels labels
      :listing listing
      :symbols symbols
-     :memory memory}))
+     :memory memory
+     :subroutines subroutines}))

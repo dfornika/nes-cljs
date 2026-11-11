@@ -182,9 +182,18 @@ move to its own repository once its API settles. Games are in
   `(rd :player/x)` `(break! :main)` `(dis :nmi)` `(syms)` at the REPL
 - [ ] **Memory follow-ups** – fixed-point types; put the most-used variables in the zero page
   (count uses in the code); show `:doc` in the Lens tab; a memory map of what's allocated
-- [ ] **Generators and subroutines** (next) – `add16`, `times`, `defsub`; what each clobbers,
-  as data; property tests (test.check) against plain Clojure functions
-- [ ] **Runtime skeleton** – reset/init, NMI handler, controller, sprite buffer, a queue of
+- [x] **Generators** – `gamedev-toolkit.gen`: `add16` `sub16` `inc16` `compare16` `move`
+  `fill` `copy`; `when-flag` `if-flag` `do-while` `times` `forever`; `preserving`. Checked with
+  test.check: the generated code runs on the CPU and is compared with Clojure arithmetic
+- [x] **What code clobbers, worked out from the code** – `gamedev-toolkit.analysis/clobbers`
+  reads the instructions (and follows calls); `times` refuses a body that changes its counter
+- [x] **Subroutines** – `gamedev-toolkit.sub`: `sub`, `call`, `inline`; `link` includes only the
+  ones reached; their descriptions show as tooltips on labels in the CPU tab
+- [ ] **Generator follow-ups** – multiply and divide by constants, signed compares, 8.8
+  fixed point, loops over more than 256 bytes, a long form of `times` when the body is too
+  big for a branch; simple optimizations (a `LDA x` straight after `STA x`); count the bytes and
+  cycles of a piece of code
+- [ ] **Runtime skeleton** (next) – reset/init, NMI handler, controller, sprite buffer, a queue of
   video memory writes, the state machine; then a first real game (single screen)
 - [ ] **Download the built ROM** as a `.nes` file, and build from the command line
   (the toolkit runs on JVM Clojure too)

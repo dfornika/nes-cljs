@@ -77,7 +77,10 @@
   [x]
   (and (vector? x) (keyword? (first x))))
 
-(defn- flatten-forms [x]
+(defn flatten-forms
+  "A program, however its sequences are nested, as one flat vector of
+  instructions and directives."
+  [x]
   (cond
     (nil? x) []
     (form? x) [x]
@@ -213,7 +216,10 @@
                  (place {:type :bytes :exprs items :size (count items)}))
            :dw (place {:type :words :exprs (vec args) :size (* 2 (count args))})
            (if-not (modes-of op)
-             (fail (str "Unknown instruction " (pr-str op)) form)
+             (fail (if (= op :call)
+                     "A subroutine call has to be linked before assembling: see gamedev-toolkit.sub/link (rom/nrom does it)"
+                     (str "Unknown instruction " (pr-str op)))
+                   form)
              (let [operand (parse-operand form)
                    mode (choose-mode op operand early form)]
                (place {:type :instruction :mnemonic op :mode mode :expr (:expr operand)
