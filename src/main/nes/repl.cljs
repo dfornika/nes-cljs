@@ -35,6 +35,9 @@
     (lens-source \"Player\")   ; print it as code to paste into a file
 
     (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
+    (syms)                   ; a game built here has names: its labels and variables
+    (rd :player/x)           ; ...which work wherever an address does
+    (break! :write :color) (dis :main)
     (asm/assemble [[:lda [:imm 1]] [:rts]])   ; the assembler by itself
 
   Reading never has side effects: `rd` on an I/O register like $2002
@@ -46,6 +49,7 @@
             [nes.breakpoints :as bp]
             [nes.code-log :as code-log]
             [nes.cpu.disasm :as disasm]
+            [nes.debug-info :as debug-info]
             [nes.emulator :as emu]
             [nes.lens :as lens]
             ;; game-specific lenses register themselves when loaded
@@ -54,7 +58,8 @@
             [nes.lenses.zelda]
             [nes.snapshot :as snapshot]
             [nes.state :refer [db]]
-            [nes.text-table :as text-table]))
+            [nes.text-table :as text-table]
+            [nes.workbench :as workbench]))
 
 (defn- emulator []
   (or (console/emulator-instance)
@@ -67,13 +72,42 @@
   ([n width] (disasm/hex n width)))
 
 ;; ---------------------------------------------------------------------------
+;; Names
+;;
+;; A game built here (see `play!`) has names for its variables and the
+;; labels in its code. Wherever these tools take a CPU address, they take
+;; a name too: (rd :player/x), (break! :main), (dis :nmi).
+
+(defn- symbol-table []
+  (debug-info/table-for (get-in @db [:rom :sha1])))
+
+(defn sym
+  "The address of a name in the loaded game: (sym :player/x) => 4.
+  Numbers come back as they are."
+  [x]
+  (if (number? x)
+    x
+    (or (debug-info/address (symbol-table) x)
+        (throw (ex-info (str "The loaded game has nothing called " (pr-str x)
+                             (when-not (symbol-table) ". (Only games built here have names: see play!)"))
+                        {:name x})))))
+
+(defn syms
+  "The loaded game's names and their addresses (as hex), sorted by
+  address. nil for a game with none."
+  []
+  (when-let [t (symbol-table)]
+    (mapv (fn [[n a]] [n (hex a 4)]) (sort-by (juxt val key) (:addresses t)))))
+
+;; ---------------------------------------------------------------------------
 ;; Memory and registers
 
 (defn rd
-  "Read the byte at CPU address `addr`, or `n` bytes from there.
-  nil for addresses that can't be read without side effects (I/O)."
-  ([addr] (emu/cpu-peek (emulator) addr))
-  ([addr n] (mapv #(emu/cpu-peek (emulator) (+ addr %)) (range n))))
+  "Read the byte at CPU address `addr` (a number or a name), or `n` bytes
+  from there. nil for addresses that can't be read without side effects
+  (I/O)."
+  ([addr] (emu/cpu-peek (emulator) (sym addr)))
+  ([addr n] (let [addr (sym addr)] (mapv #(emu/cpu-peek (emulator) (+ addr %)) (range n)))))
 
 (defn rd-ppu
   "Read the byte at PPU address `addr`, or `n` bytes from there."
@@ -84,7 +118,8 @@
   "Write `value` (and any more values, to the following addresses) into
   RAM at CPU address `addr`. Only RAM and cartridge RAM can be poked."
   [addr value & more]
-  (let [e (emulator)]
+  (let [e (emulator)
+        addr (sym addr)]
     (doseq [[i v] (map-indexed vector (cons value more))
             :let [a (+ addr i)]]
       (when-not (emu/cpu-poke! e a v)
@@ -102,7 +137,8 @@
         {:keys [p pc] :as cpu} (emu/cpu-state e)]
     (assoc cpu
            :flags (snapshot/decode-flags p)
-           :next (disasm/text (disasm/decode #(emu/cpu-peek e %) pc)))))
+           :next (disasm/text (disasm/decode #(emu/cpu-peek e %) pc)
+                              (debug-info/namer (symbol-table))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Running
@@ -138,6 +174,7 @@
     (break! :access [0x0300 0x033F]) ; on any read or write in a range
     (break! :write 0x003F {:value 0}) ; only when 0 is written
     (break! :write 0x0055 {:when (fn [{:keys [value]}] (> value 200))})
+    (break! :main) (break! :write :player/x)   ; names, in games that have them
 
   Returns the breakpoint's id. While running, the game pauses there; use
   (why) to see what happened and (continue!) to carry on."
@@ -145,7 +182,7 @@
   ([kind addr] (break! kind addr {}))
   ([kind addr opts]
    (assert (some #{kind} bp/kinds) (str "kind is one of " bp/kinds))
-   (let [[lo hi] (if (vector? addr) addr [addr nil])]
+   (let [[lo hi] (map #(some-> % sym) (if (vector? addr) addr [addr nil]))]
      (console/add-breakpoint! (cond-> (merge (select-keys opts [:value :when]) {:kind kind :addr lo})
                                 hi (assoc :end hi))))))
 
@@ -215,18 +252,23 @@
 ;; Printing
 
 (defn dis
-  "Print `n` instructions (default 12) disassembled from `addr` (default:
-  the program counter)."
+  "Print `n` instructions (default 12) disassembled from `addr` (a number
+  or a name; default: the program counter). Addresses with names show
+  them."
   ([] (dis (:pc (emu/cpu-state (emulator)))))
   ([addr] (dis addr 12))
   ([addr n]
    (let [e (emulator)
-         pc (:pc (emu/cpu-state e))]
-     (doseq [{:keys [addr bytes] :as instr} (disasm/disassemble #(emu/cpu-peek e %) addr n)]
+         pc (:pc (emu/cpu-state e))
+         table (symbol-table)
+         name-of (debug-info/namer table)]
+     (doseq [{:keys [addr bytes] :as instr} (disasm/disassemble #(emu/cpu-peek e %) (sym addr) n)]
+       (when-let [label (debug-info/label-at table addr)]
+         (println (str label ":")))
        (println (str (if (= addr pc) "▶ " "  ")
                      (subs (hex addr 4) 1) "  "
                      (.padEnd (str/join " " (map #(if % (subs (hex % 2) 1) "??") bytes)) 9)
-                     (disasm/text instr)))))))
+                     (disasm/text instr name-of)))))))
 
 (defn hexdump
   "Print `n` bytes (default 128) of CPU memory from `addr`, 16 per line.
@@ -374,9 +416,7 @@
   "Put a cartridge built with gamedev-toolkit into the console and start
   it: (play! (hello/build)). Takes what a game's `build` returns (a map
   with :rom, the .nes file's bytes, and maybe :name), or just the bytes.
-  Returns the ROM's size in bytes."
+  The game's variables become a lens (see `look`), and its names work as
+  addresses (see `syms`). Returns the ROM's size in bytes."
   [built]
-  (let [bytes (if (map? built) (:rom built) built)
-        rom-name (or (when (map? built) (:name built)) "built.nes")]
-    (console/load-bytes! rom-name (js/Uint8Array.from (clj->js bytes)))
-    (count bytes)))
+  (workbench/play! built))

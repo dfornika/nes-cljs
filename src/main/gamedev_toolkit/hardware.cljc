@@ -32,6 +32,10 @@
   {:a 0x80 :b 0x40 :select 0x20 :start 0x10
    :up 0x08 :down 0x04 :left 0x02 :right 0x01})
 
+(def button-bits
+  "The same, as bit numbers: for a [:bits ...] variable."
+  {:a 7 :b 6 :select 5 :start 4 :up 3 :down 2 :left 1 :right 0})
+
 (def video
   "Addresses in the PPU's own memory (reached through :ppuaddr/:ppudata)."
   {:nametable-0 0x2000   ; the background: 30 rows of 32 tile numbers...

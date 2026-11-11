@@ -73,8 +73,11 @@ html, body, #app {
    bottom (16/15 = the screen's width / height). */
 .console-column {
     flex: none;
-    width: min(58vw, calc((100dvh - 190px) * 16 / 15));
+    /* --console-width is set when the bar beside it has been dragged */
+    width: var(--console-width, min(58vw, calc((100dvh - 190px) * 16 / 15)));
     min-width: 280px;
+    /* always leave the inspectors some room, e.g. after the window shrinks */
+    max-width: calc(100% - 356px);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -93,6 +96,37 @@ html, body, #app {
     gap: 8px;
     flex: none;
 }
+
+/* The bar between the screen and the inspectors: drag it sideways. It
+   sits exactly over the gap between them (the margins cancel the gap on
+   each side). */
+.splitter {
+    flex: none;
+    width: 16px;
+    margin: 0 -16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: col-resize;
+    /* so dragging on a touch screen moves the bar, not the page */
+    touch-action: none;
+    user-select: none;
+    z-index: 1;
+}
+.splitter-grip {
+    width: 4px;
+    height: 56px;
+    border-radius: 2px;
+    background: #d0d7de;
+    transition: background 0.1s, height 0.1s;
+}
+.splitter:hover .splitter-grip,
+.splitter:active .splitter-grip,
+.splitter:focus-visible .splitter-grip {
+    background: #0969da;
+    height: 96px;
+}
+.splitter:focus-visible { outline: none; }
 
 .inspector {
     flex: 1;
@@ -141,6 +175,7 @@ body:has(.app.theater), .app:fullscreen {
 
 .app.theater .console-column {
     width: 100%;
+    max-width: none;
     /* room for the drawer's bar when it's closed */
     padding-bottom: 34px;
 }
@@ -217,6 +252,10 @@ body:has(.app.theater), .app:fullscreen {
     .console-column {
         width: 100%;
         min-width: 0;
+        max-width: none;
+    }
+    .splitter {
+        display: none;
     }
     .screen-box {
         flex: none;

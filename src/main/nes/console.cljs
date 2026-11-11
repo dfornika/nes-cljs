@@ -9,6 +9,7 @@
   (:require [reagent.core :as r]
             [nes.audio :as audio]
             [nes.breakpoints :as bp]
+            [nes.cpu.disasm :as disasm]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.rom :as rom]
@@ -241,8 +242,17 @@
   (audio/clear!)
   (refresh-inspectors!))
 
+;; The last few instructions run with Step instruction (decoded, see
+;; nes.cpu.disasm), oldest first, so the CPU tab can show where you've just
+;; been. Anything else that runs the game (Run, Step frame...) empties it:
+;; too much has happened since to call them 'the last few'.
+(defonce recent-steps (r/atom []))
+
+(def recent-steps-kept 3)
+
 (defn resume! []
   (when (and @emulator (#{:paused} (:status @db)))
+    (reset! recent-steps [])
     (swap! db assoc :status :running :break nil)
     (swap! clock assoc :last-ts nil :behind-ms 0)
     (schedule!)))
@@ -330,6 +340,7 @@
     (when @bus-monitor? (emu/take-bus-activity! @emulator))
     ;; whatever stopped us before is old news after a step
     (swap! db assoc :break nil)
+    (reset! recent-steps [])
     (try
       (f @emulator)
       (show-picture-so-far! @emulator)
@@ -350,9 +361,14 @@
                      (swap! db assoc :break hit)))))
 
 (defn step-instruction!
-  "Run exactly one CPU instruction, then stay paused."
+  "Run exactly one CPU instruction, then stay paused. The instruction is
+  remembered in `recent-steps`."
   []
-  (while-paused! emu/step-instruction!))
+  (let [before @recent-steps
+        instr (when-let [e @emulator]
+                (disasm/decode #(emu/cpu-peek e %) (:pc (emu/cpu-state e))))]
+    (when (while-paused! emu/step-instruction!)
+      (reset! recent-steps (vec (take-last recent-steps-kept (conj before instr)))))))
 
 (defn step-scanline-on!
   "Run instructions until the PPU moves on to another scanline (at most a
@@ -374,6 +390,7 @@
 (defn reset-console! []
   (when-let [e @emulator]
     (emu/press-reset! e)
+    (reset! recent-steps [])
     (refresh-inspectors!)
     (when (= :crashed (:status @db))
       (swap! db assoc :status :paused :error nil)
@@ -437,6 +454,7 @@
         (reset! emulator e)
         (reset! bus-log [])
         (reset! bus-activity nil)
+        (reset! recent-steps [])
         (swap! db assoc
                :rom {:name rom-name :size (.-length bytes) :header header
                      :sha1 (rom/rom-hash bytes)}

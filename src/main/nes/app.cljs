@@ -11,6 +11,7 @@
             [nes.cpu-view :refer [cpu-view]]
             [nes.instructions-view :refer [instructions-view]]
             [nes.drawer :refer [drawer]]
+            [nes.splitter :as splitter :refer [splitter]]
             [nes.input :as input]
             [nes.sound :as sound]
             [nes.lens-view :refer [lens-view]]
@@ -24,7 +25,8 @@
             [nes.tiles-view :refer [tiles-view]]
             [games.hello :as hello]
             [nes.touchpad :as touchpad]
-            [nes.ui :as ui]))
+            [nes.ui :as ui]
+            [nes.workbench :as workbench]))
 
 (def sample-roms
   [{:name "Hello"
@@ -269,8 +271,7 @@
       [:button {:on-click (fn []
                             (hide-popover! "samples-menu")
                             (if build
-                              (let [built (build)]
-                                (console/load-bytes! (:name built) (js/Uint8Array.from (clj->js (:rom built)))))
+                              (workbench/play! (build))
                               (console/load-url! url)))
                 :style {:font-weight "bold"}}
        name]
@@ -352,18 +353,29 @@
      (for [[k {:keys [label title action]}] @dev-tools]
        ^{:key k} [:button {:on-click action :title title} label])]))
 
+;; The width the screen's column was dragged to on an earlier visit.
+;; (true, so defonce sees a value and doesn't do it again on reload)
+(defonce ^:private restored-split
+  (do (when-let [w (splitter/saved-width)]
+        (swap! db assoc :console-width w))
+      true))
+
 (defn app
   "The page: a header, the console (screen and buttons), and the
   inspectors, either beside the screen or (in big-screen mode) in a drawer
   that pulls up over it. The page itself never scrolls; the inspector
-  panel scrolls inside itself."
+  panel scrolls inside itself. Beside the screen, a bar between the two
+  drags to give either more room."
   []
-  (let [{:keys [theater? error]} @db]
+  (let [{:keys [theater? error console-width]} @db]
     [:div {:class (str "app" (when theater? " theater"))}
      [header]
      [ui/error-boundary
       [:main {:class "app-main"}
-       [:div {:class "console-column"}
+       [:div {:class "console-column"
+              ;; set by dragging the bar; the stylesheet uses it only in
+              ;; the side-by-side layout
+              :style (when console-width {"--console-width" (str console-width "px")})}
         [screen-area]
         [touchpad/touchpad]
         [break-notice]
@@ -374,4 +386,6 @@
           [c/callout {:kind :error} error])]
        (if theater?
          [drawer db :drawer-height "Inspectors" [inspector]]
-         [inspector])]]]))
+         [:<>
+          [splitter db :console-width]
+          [inspector]])]]]))
