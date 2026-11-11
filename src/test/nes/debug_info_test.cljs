@@ -37,6 +37,21 @@
                 :enemies.x [0 0 0 0] :enemies.hp [0 9 0 0]}
                v))))))
 
+(deftest fixed-point-variables
+  (let [m (memory/allocate [[:speed :s8.8] [:player {:x :u8.8 :hp :u8}]])
+        fields (di/lens-fields m)
+        ram (assoc (vec (repeat 0x800 0)) 0 0x80, 1 0xFF, 2 0x40, 3 100, 4 7)
+        t (di/symbol-table {:labels {} :memory m})]
+    (is (= [[:speed [:s8.8 0]] [:player [:struct 2 [:x :u8.8 :hp :u8]]]] fields))
+    (is (= {:speed -0.5 :player {:x 100.25 :hp 7}} (lens/interpret fields {:ram ram})))
+    (is (= ["speed" "speed+1" "player.x" "player.x+1" "player.hp"] (map #(di/name-at t %) (range 5))))
+    (testing "changing one writes both bytes"
+      (is (= [{:space :cpu :addr 0 :value 0x80} {:space :cpu :addr 1 :value 0x01}]
+             (lens/writes {:ram ram} [:s8.8 0] 1.5)))
+      (is (= [{:space :cpu :addr 0 :value 0xC0} {:space :cpu :addr 1 :value 0xFF}]
+             (lens/writes {:ram ram} [:s8.8 0] "-0.25")))
+      (is (lens/editable? [:u8.8 0])))))
+
 (deftest names-for-addresses
   (let [t (di/symbol-table {:labels {:main 0xC000 :nmi 0xC010} :memory mem})]
     (is (= "frame" (di/name-at t 0)))
@@ -68,14 +83,17 @@
         t (di/symbol-table built)
         name-of (di/namer t)
         peek #(get prg (- % 0xC000))
-        at (fn [label] (disasm/decode peek (di/address t label)))
         lines (fn [label n] (mapv #(disasm/text % name-of) (disasm/disassemble peek (di/address t label) n)))]
     (is (= ["SEI" "CLD" "LDX #$40" "STX APU_FRAME"] (lines :reset 4)) "a hardware register, as written")
-    (is (= ["LDA buttons" "STA prev-buttons" "LDA #$01" "STA JOY1"] (lines :main 4)) "variables")
-    (is (= "STA oam,X" (first (lines :hide-sprites 1))))
-    (is (= "BNE hide-sprites" (nth (lines :hide-sprites 3) 2)) "a branch to a label")
-    (is (= ["CMP frame" "BEQ wait-for-frame" "JMP main"] (lines :wait-for-frame 3)))
-    (is (some #{"INC player.x"} (lines :main 40)) "a struct's field")
-    (is (= "LDA buttons" (disasm/text (at :main) name-of)))
+    (is (= ["JSR read-controller" "JSR move-player" "JSR draw-player" "LDA frame"] (lines :main 4))
+        "subroutines, and a variable")
+    (is (= ["LDA buttons" "STA prev-buttons" "LDA #$01" "STA JOY1"] (lines :read-controller 4)))
+    (is (= ["CMP frame" "BEQ wait-for-frame" "JMP main"] (lines :wait-for-frame 3)) "a branch to a label")
+    (is (some #{"STA player.x+1"} (lines :move-player 12)) "a struct's field (its second byte)")
+    (is (some #{"STA oam,X"} (lines :reset 40)))
+    (testing "a subroutine's description comes along"
+      (is (re-find #"^Move the player" (di/doc-at t (di/address t :move-player))))
+      (is (= "Counts frames; the NMI handler adds 1" (di/doc-at t (di/address t :frame))))
+      (is (nil? (di/doc-at t (di/address t :main)))))
     (testing "without names it's as before"
       (is (= "STX $4017" (nth (mapv disasm/text (disasm/disassemble peek 0xC000 4)) 3))))))

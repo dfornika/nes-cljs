@@ -180,11 +180,24 @@ move to its own repository once its API settles. Games are in
   page first. A built game brings a "Variables" lens and its names (`nes.debug-info`,
   `nes.workbench`): `STA player.x` and `main:` in the CPU tab, breakpoints by name,
   `(rd :player/x)` `(break! :main)` `(dis :nmi)` `(syms)` at the REPL
-- [ ] **Memory follow-ups** – fixed-point types; put the most-used variables in the zero page
+- [ ] **Memory follow-ups** – put the most-used variables in the zero page
   (count uses in the code); show `:doc` in the Lens tab; a memory map of what's allocated
-- [ ] **Generators and subroutines** (next) – `add16`, `times`, `defsub`; what each clobbers,
-  as data; property tests (test.check) against plain Clojure functions
-- [ ] **Runtime skeleton** – reset/init, NMI handler, controller, sprite buffer, a queue of
+- [x] **Generators** – `gamedev-toolkit.gen`: `add16` `sub16` `inc16` `compare16` `move`
+  `fill` `copy`; `when-flag` `if-flag` `do-while` `times` `forever`; `preserving`. Checked with
+  test.check: the generated code runs on the CPU and is compared with Clojure arithmetic
+- [x] **What code clobbers, worked out from the code** – `gamedev-toolkit.analysis/clobbers`
+  reads the instructions (and follows calls); `times` refuses a body that changes its counter
+- [x] **Subroutines** – `gamedev-toolkit.sub`: `sub`, `call`, `inline`; `link` includes only the
+  ones reached; their descriptions show as tooltips on labels in the CPU tab
+- [x] **More generators** – `multiply`, `divide`, `multiply-a` / `divide-a` (by constants, with
+  shifts); `compare-signed`, `compare16-signed`, `add-signed-byte`; 8.8 fixed point (`:u8.8` /
+  `:s8.8` variables, shown and edited as decimals in the Lens tab; `gen/fixed`, `gen/whole`);
+  `fill` / `copy` up to 4 KB and `times` up to 65536; loops and conditions switch to a `JMP`
+  by themselves when the body is too big for a branch; `analysis/size` counts bytes
+- [ ] **Simple optimizations** – e.g. drop a `LDA x` straight after `STA x`
+- [ ] **Cycle counts without running** – for straight-line code, from the opcode table (for
+  now, `nes.cpu.harness/run-routine` runs the code and reports the cycles it took)
+- [ ] **Runtime skeleton** (next) – reset/init, NMI handler, controller, sprite buffer, a queue of
   video memory writes, the state machine; then a first real game (single screen)
 - [ ] **Download the built ROM** as a `.nes` file, and build from the command line
   (the toolkit runs on JVM Clojure too)

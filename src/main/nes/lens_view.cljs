@@ -54,6 +54,8 @@
   "A decoded value, shown as readably as we can manage."
   [v]
   (cond
+    ;; fixed-point values have fractions: three decimal places is plenty
+    (and (number? v) (not (int? v))) [:span {:style mono} (js/parseFloat (.toFixed v 3))]
     (number? v) [:span {:style mono} v (when (> v 9) [:span {:style muted} " " (hex v (if (< v 256) 2 4))])]
     (true? v) [:span {:style {:color "#1a7f37"}} "✓ yes"]
     (false? v) [:span {:style muted} "✗ no"]
@@ -105,12 +107,14 @@
 ;; Changing values
 
 (defn- parse-number
-  "A number typed by a person: 42, $2A or 0x2A. nil if it isn't one."
+  "A number typed by a person: 42, $2A, 0x2A or (for fixed-point values)
+  1.5. nil if it isn't one."
   [text]
   (let [t (.trim (str text))]
     (cond
       (re-matches #"(\$|0x|0X)[0-9a-fA-F]+" t) (js/parseInt (.replace t (js/RegExp. "^(\\$|0x)" "i") "") 16)
-      (re-matches #"-?\d+" t) (js/parseInt t 10))))
+      (re-matches #"-?\d+" t) (js/parseInt t 10)
+      (re-matches #"-?\d*\.\d+" t) (js/parseFloat t))))
 
 (defn- unwrap [[type inner :as spec]] (if (= type :rom) inner spec))
 

@@ -77,7 +77,10 @@
   [x]
   (and (vector? x) (keyword? (first x))))
 
-(defn- flatten-forms [x]
+(defn flatten-forms
+  "A program, however its sequences are nested, as one flat vector of
+  instructions and directives."
+  [x]
   (cond
     (nil? x) []
     (form? x) [x]
@@ -213,7 +216,10 @@
                  (place {:type :bytes :exprs items :size (count items)}))
            :dw (place {:type :words :exprs (vec args) :size (* 2 (count args))})
            (if-not (modes-of op)
-             (fail (str "Unknown instruction " (pr-str op)) form)
+             (fail (if (= op :call)
+                     "A subroutine call has to be linked before assembling: see gamedev-toolkit.sub/link (rom/nrom does it)"
+                     (str "Unknown instruction " (pr-str op)))
+                   form)
              (let [operand (parse-operand form)
                    mode (choose-mode op operand early form)]
                (place {:type :instruction :mnemonic op :mode mode :expr (:expr operand)
@@ -265,6 +271,15 @@
                  :else (fail (str (hex v) " isn't in the zero page ($00-$FF)") form))])
           3 (let [v (word-value (value expr) form)]
               [opcode (lo v) (hi v)]))))))
+
+(defn size
+  "How many bytes `forms` take once assembled, without assembling them:
+  labels don't have to be defined. `symbols` (as for `assemble`) decide
+  which instructions get the shorter zero-page form; without them the
+  answer can be a little high, never low."
+  ([forms] (size forms {}))
+  ([forms symbols]
+   (:pc (layout (flatten-forms forms) 0 symbols))))
 
 (defn assemble
   "Assemble `forms` (see the namespace docstring) into machine code.

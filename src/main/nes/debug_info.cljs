@@ -59,7 +59,7 @@
   "[[addr name] ...] for every byte of a variable."
   [{:keys [name kind type addr size]}]
   (let [base (display-name name)
-        size-of #(if (= % :u16) 2 1)]
+        size-of #(if (#{:u16 :u8.8 :s8.8} %) 2 1)]
     (case kind
       (:scalar :array) (byte-names base addr size)
       :struct (first (reduce (fn [[out at] [k t]]
@@ -77,11 +77,14 @@
 
     {:names     {address \"name\"}    every byte of every variable, and every label
      :labels    {address \"name\"}    just the labels in the code
+     :docs      {address \"...\"}     what subroutines and variables are for
      :addresses {\"name\" address}}"
-  [{:keys [labels memory]}]
+  [{:keys [labels memory subroutines]}]
   (let [label-names (into {} (for [[k addr] labels] [addr (display-name k)]))]
     {:names (into label-names (mapcat variable-names (:variables memory)))
      :labels label-names
+     :docs (into {} (concat (for [{:keys [name doc]} subroutines :when doc] [(labels name) doc])
+                            (for [{:keys [addr doc]} (:variables memory) :when doc] [addr doc])))
      :addresses (into {} (for [[k addr] (merge (:symbols memory) labels)] [(display-name k) addr]))}))
 
 ;; ---------------------------------------------------------------------------
@@ -124,6 +127,12 @@
   "The label on the code at `addr`, if any."
   [table addr]
   (get-in table [:labels addr]))
+
+(defn doc-at
+  "What the game's source says the subroutine or variable at `addr` is
+  for, if anything."
+  [table addr]
+  (get-in table [:docs addr]))
 
 (def ^:private stores #{:sta :stx :sty :sax})
 

@@ -8,6 +8,7 @@
                  {:symbols {:n 0x10} :memory {0x10 40}})
     ;; => {:a 42 ... :cycles 16 :peek f}, and ((:peek result) 0x10) => 42"
   (:require [gamedev-toolkit.asm :as asm]
+            [gamedev-toolkit.sub :as sub]
             [nes.cpu.core :as cpu]))
 
 (defn machine
@@ -42,8 +43,8 @@
   0xFFF0)
 
 (defn run-routine
-  "Assemble `forms` (a routine ending in RTS), call it, and return the
-  CPU's registers when it returns:
+  "Assemble `forms` (a routine ending in RTS, with any subroutines it
+  calls), call it, and return the CPU's registers when it returns:
 
     {:a :x :y :sp :p   registers (p is the flags byte)
      :carry? :zero? :negative?
@@ -60,7 +61,7 @@
   ([forms] (run-routine forms {}))
   ([forms {:keys [symbols a x y memory org max-cycles]
            :or {symbols {} a 0 x 0 y 0 org 0x8000 max-cycles 100000}}]
-   (let [{:keys [bytes labels]} (asm/assemble forms {:org org :symbols symbols})
+   (let [{:keys [bytes labels]} (asm/assemble (:code (sub/link forms)) {:org org :symbols symbols})
          {:keys [^js mem ^js s] :as m} (machine bytes org)
          ;; RTS goes to the address on the stack plus one
          ret (dec return-address)]
