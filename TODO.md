@@ -120,6 +120,8 @@ played. So combine them.
 - [ ] **Remappable keys** and gamepad buttons
 - [ ] **Sound at other speeds** – resample instead of muting
 - [ ] **Turbo key** – hold to fast-forward
+- [x] **Touch controller** – D-pad, A/B, Select/Start for phones and tablets: under the screen in
+  portrait, beside it in big screen landscape; multi-touch, sliding, diagonals
 - [x] **Page fits the window** (no page scroll), **big-screen mode** with a pull-up
   inspector drawer, **full screen**, Sample ROMs and Controls in pop-ups
 - [x] **More sample ROMs** – Thwaite, 240p Test Suite

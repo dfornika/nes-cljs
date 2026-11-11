@@ -22,6 +22,7 @@
             [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db dev-tools]]
             [nes.tiles-view :refer [tiles-view]]
+            [nes.touchpad :as touchpad]
             [nes.ui :as ui]))
 
 (def sample-roms
@@ -135,6 +136,10 @@
   (let [pads (:gamepads @db)]
     [:div
      [:h3 {:style {:margin-top 0}} "Controls"]
+     [:label {:style {:display "block" :margin-bottom "8px" :cursor "pointer"}}
+      [:input {:type "checkbox" :checked (boolean (touchpad/shown?))
+               :on-change #(touchpad/show! (not (touchpad/shown?)))}]
+      " Show the touch controller (on by default on touch screens)"]
      [:table {:style {:border-spacing "0 3px"}}
       [:thead
        [:tr {:style {:color "#57606a" :font-size "13px" :text-align "left"}}
@@ -350,6 +355,7 @@
       [:main {:class "app-main"}
        [:div {:class "console-column"}
         [screen-area]
+        [touchpad/touchpad]
         [break-notice]
         [:div {:class "console-buttons"}
          [controls]

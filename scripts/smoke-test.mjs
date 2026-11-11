@@ -214,6 +214,28 @@ try {
     check(true, 'big screen: back to normal');
   });
 
+  await step('touch controller', async () => {
+    // A phone: the on-screen controller appears, and pressing it presses
+    const phone = await browser.newContext({viewport: {width: 412, height: 915}, hasTouch: true, isMobile: true});
+    const p = await phone.newPage();
+    p.on('pageerror', e => errors.push(e.message));
+    await p.goto(url);
+    await p.click('button:text-is("Sample ROMs ▾")');
+    await p.click('button:text-is("Concentration Room")');
+    await p.waitForSelector('.touchpad');
+    // a finger on the middle of A (the controller works out what's under it)
+    const touch = (type) => p.locator('.tp-a').evaluate((el, type) => {
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new PointerEvent(type, {pointerId: 1, pointerType: 'touch', bubbles: true, cancelable: true,
+                                               clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}));
+    }, type);
+    await touch('pointerdown');
+    const held = await p.locator('.tp-on').allTextContents();
+    await touch('pointerup');
+    check(held.includes('A'), `touch controller: shown on a phone, A presses (${held.join(' ')})`);
+    await phone.close();
+  });
+
   check(errors.length === 0, `no errors in the page${errors.length ? ':\n  ' + errors.join('\n  ') : ''}`);
 } finally {
   await browser.close();
