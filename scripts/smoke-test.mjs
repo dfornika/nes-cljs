@@ -230,7 +230,11 @@ try {
                                                clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}));
     }, type);
     await touch('pointerdown');
-    const held = await p.locator('.tp-on').allTextContents();
+    // wait for the page to redraw the button as pressed
+    const held = await until(async () => {
+      const t = await p.locator('.tp-on').allTextContents();
+      return t.includes('A') && t;
+    }).catch(() => []);
     await touch('pointerup');
     check(held.includes('A'), `touch controller: shown on a phone, A presses (${held.join(' ')})`);
     await phone.close();
