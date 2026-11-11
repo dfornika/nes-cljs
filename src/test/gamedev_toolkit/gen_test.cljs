@@ -109,7 +109,7 @@
     (is (thrown-with-msg? js/Error #"changes x"
                           (gen/times 3 (call (sub/sub :uses-x [[:ldx [:imm 0]]]))))
         "...including by a subroutine it calls"))
-  (is (thrown-with-msg? js/Error #"1 to 256" (gen/times 0 [:nop]))))
+  (is (thrown-with-msg? js/Error #"1 to 65536" (gen/times 0 [:nop]))))
 
 (deftest preserving
   (testing "only what the body changes is saved"
@@ -129,3 +129,119 @@
     (is (= #{:a} (analysis/clobbers (gen/preserving [:x] [:ldx [:imm 2]]))))
     (is (= #{:y} (analysis/clobbers (gen/preserving [:a :x] [:ldx [:imm 2]] [:iny])))))
   (is (thrown-with-msg? js/Error #"Registers are" (gen/preserving [:z] [:nop]))))
+
+;; ---------------------------------------------------------------------------
+;; Multiplying, dividing, signed numbers, fixed point
+
+(def ^:private s8 (tc/choose -128 127))
+(def ^:private s16 (tc/choose -32768 32767))
+
+(defspec multiply-is-times 200
+  (prop/for-all [a u8, b u8]
+    (and (= (* a b) (:out (run (gen/multiply :out :n :m) a b)))
+         (= (* a b) (:out (run (gen/multiply :out :n [:imm b]) a 0))))))
+
+(defspec divide-is-quot-and-rem 200
+  (prop/for-all [a u8, b (tc/choose 1 255)]
+    (let [r (run (gen/divide :out :n :m 0x16) a b)
+          by-constant (run (gen/divide :out :n [:imm b]) a 0)]
+      (and (= (quot a b) (bit-and (:out r) 0xFF) (bit-and (:out by-constant) 0xFF))
+           (= (rem a b) (:a r) ((:peek r) 0x16) (:a by-constant))))))
+
+(defspec multiply-a-by-a-constant 200
+  (prop/for-all [a u8, n u8]
+    (= (bit-and (* a n) 0xFF)
+       (:a (harness/run-routine [(gen/multiply-a n 0x20) [:rts]] {:a a})))))
+
+(deftest multiply-and-divide-a
+  (is (= [[:asl :a] [:asl :a] [:asl :a]] (gen/multiply-a 8)) "a power of two is just shifts")
+  (is (= [] (gen/multiply-a 1)))
+  (is (thrown-with-msg? js/Error #"needs a scratch variable" (gen/multiply-a 5)))
+  (doseq [n [1 2 4 8 16 32 64 128], a [0 1 7 100 255]]
+    (is (= (quot a n) (:a (harness/run-routine [(gen/divide-a n) [:rts]] {:a a}))) (str a " / " n)))
+  (is (thrown-with-msg? js/Error #"power of two" (gen/divide-a 10)))
+  (testing "dividing by zero gives 255, remainder the number"
+    (let [r (run (gen/divide :out :n :m) 77 0)]
+      (is (= [255 77] [(bit-and (:out r) 0xFF) (:a r)])))))
+
+(defspec signed-compares 300
+  (prop/for-all [a s8, b s8, c s16, d s16]
+    (let [bytes (run (gen/compare-signed :n :m) (bit-and a 0xFF) (bit-and b 0xFF))
+          words (run (gen/compare16-signed :n :m) (bit-and c 0xFFFF) (bit-and d 0xFFFF))
+          same (run (gen/compare16-signed :n :m) (bit-and c 0xFFFF) (bit-and c 0xFFFF))]
+      (and (= (< a b) (:negative? bytes))
+           (= (< c d) (:negative? words))
+           (not (:negative? same))))))
+
+(defspec add-signed-byte-steps 200
+  (prop/for-all [a u16, step s8]
+    (and (= (bit-and (+ a step) 0xFFFF) (:n (run (gen/add-signed-byte :n :m) a (bit-and step 0xFF))))
+         (= (bit-and (+ a step) 0xFFFF) (:n (run (gen/add-signed-byte :n [:imm step]) a 0))))))
+
+(deftest fixed-point
+  (is (= 384 (gen/fixed 1.5)))
+  (is (= 30720 (gen/fixed 120)))
+  (is (= 0xFF00 (gen/fixed -1)))
+  (is (= 0xFFC0 (gen/fixed -0.25)))
+  (is (= [:+ :pos 1] (gen/whole :pos)))
+  (testing "1.5 a step: 3 whole pixels after two steps"
+    (let [step (gen/add16 :n [:imm (gen/fixed 1.5)])]
+      (is (= (gen/fixed 103) (:n (run [step step] (gen/fixed 100) 0)))))))
+
+;; ---------------------------------------------------------------------------
+;; Past 256, and past a branch's reach
+
+(defn- run-big [forms memory]
+  (harness/run-routine [forms [:rts]] {:symbols {:dst 0x1000 :src 0x3000 :count 0x10}
+                                       :memory memory :max-cycles 3000000}))
+
+(defspec big-fill-and-copy 30
+  (prop/for-all [n (tc/choose 1 4096)
+                 v u8]
+    (let [data (mapv #(bit-and (+ 1 (* 13 %)) 0xFF) (range 4097))
+          filled (run-big (gen/fill :dst n [:imm v]) {})
+          copied (run-big (gen/copy :dst :src n) {0x3000 data})
+          dst (fn [r] (mapv #((:peek r) (+ 0x1000 %)) (range (inc n))))]
+      (and (= (concat (repeat n v) [0]) (dst filled))
+           (= (concat (take n data) [0]) (dst copied))))))
+
+(defspec times-past-256 30
+  (prop/for-all [n (tc/one-of [(tc/choose 257 3000) (tc/elements [512 768 1024])])]
+    (let [r (run-big (gen/times n (gen/inc16 :count)) {})]
+      (= n (+ ((:peek r) 0x10) (* 256 ((:peek r) 0x11)))))))
+
+(deftest counting-to-65536
+  (let [r (run-big [(gen/times 65536 (gen/inc16 :count))
+                    ;; the count wraps to 0, so count the wraps too
+                    (gen/times 65536 [:inc 0x20])]
+                   {})]
+    (is (= [0 0 0] [((:peek r) 0x10) ((:peek r) 0x11) ((:peek r) 0x20)])))
+  (is (thrown-with-msg? js/Error #"changes y" (gen/times 300 [:iny])))
+  (is (thrown-with-msg? js/Error #"no choosing" (gen/times 300 {:with :y} [:nop])))
+  (is (thrown-with-msg? js/Error #"1 to 4096" (gen/fill :dst 5000 [:imm 0]))))
+
+(deftest bodies-too-big-for-a-branch
+  ;; 60 inc16s are about 400 bytes; a branch reaches 127. (A generator
+  ;; makes its own labels, so each inc16 is a separate call: the same
+  ;; result used twice would define the same label twice.)
+  (let [big #(repeatedly 60 (fn [] (gen/inc16 :n)))]
+    (is (= 180 (:n (run (gen/times 3 (big)) 0 0))) "times")
+    (is (= 1260 (:n (run (gen/times 3 {:with :y} (gen/times 7 (big))) 0 0))) "nested")
+    (is (= 5200 (:n (run (gen/times 260 (repeatedly 20 #(gen/inc16 :n))) 0 0))) "past 256")
+    (is (= 60 (:n (run [[:lda [:imm 0]] (gen/when-flag :zero (big))] 0 0))) "when, taken")
+    (is (= 0 (:n (run [[:lda [:imm 1]] (gen/when-flag :zero (big))] 0 0))) "when, skipped")
+    (is (= 60 (:n (run [[:lda [:imm 0]] (gen/if-flag :zero (big) (gen/move :n [:imm 9]))] 0 0))) "if, then")
+    (is (= 9 (:n (run [[:lda [:imm 1]] (gen/if-flag :zero (big) (gen/move :n [:imm 9]))] 0 0))) "if, else")
+    (is (= 120 (:n (run [[:ldx [:imm 2]] (gen/do-while :not-zero (big) [:dex])] 0 0))) "do-while")
+    (testing "small bodies still get a plain branch"
+      (is (= [:dex :bne] (map first (take-last 2 (asm/flatten-forms (gen/times 3 [:nop]))))))
+      (is (= [:dex :beq :jmp :label] (map first (take-last 4 (asm/flatten-forms (gen/times 3 (big))))))))
+    (testing "using one generated piece twice is caught by the assembler"
+      (let [once (gen/inc16 :n)]
+        (is (thrown-with-msg? js/Error #"defined twice" (run [once once] 0 0)))))))
+
+(deftest size
+  (is (= 5 (analysis/size [[:lda :n] [:sta 0x200]] {:n 0x10})) "exact with symbols")
+  (is (= 6 (analysis/size [[:lda :n] [:sta 0x200]])) "a little high without: :n might not be in the zero page")
+  (is (= 4 (analysis/size [(call (sub/sub :big (repeat 100 [:nop]))) [:rts]])) "a call is its JSR")
+  (is (= 4 (analysis/size [[:bne :somewhere] [:label :here] [:db 1 2]])) "labels needn't be defined"))

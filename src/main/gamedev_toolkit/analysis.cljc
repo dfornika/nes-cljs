@@ -6,7 +6,11 @@
 
   The 6502 has three registers a program computes with: A, X and Y. Code
   that calls a subroutine in the middle of using X needs to know whether
-  the subroutine changes X. `clobbers` answers that.")
+  the subroutine changes X. `clobbers` answers that.
+
+  `size` says how many bytes of ROM code takes. For how long code takes to
+  run, run it: nes.cpu.harness/run-routine counts the cycles."
+  (:require [gamedev-toolkit.asm :as asm]))
 
 (def ^:private writes
   "The register each instruction changes, for the ones that change one."
@@ -46,3 +50,14 @@
         :else #{}))
     (sequential? forms) (into #{} (mapcat clobbers) forms)
     :else #{}))
+
+(defn size
+  "How many bytes `forms` take in the ROM. A subroutine call counts as its
+  3-byte JSR, not the subroutine. Give `symbols` (as for asm/assemble) for
+  an exact answer; without them, names are assumed to need 16-bit
+  addresses, so the answer may be a little high but is never low."
+  ([forms] (size forms {}))
+  ([forms symbols]
+   (asm/size (map (fn [[op :as form]] (if (= op :call) [:jsr 0xFFFF] form))
+                  (asm/flatten-forms forms))
+             symbols)))

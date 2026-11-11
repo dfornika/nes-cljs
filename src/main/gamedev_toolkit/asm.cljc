@@ -272,6 +272,15 @@
           3 (let [v (word-value (value expr) form)]
               [opcode (lo v) (hi v)]))))))
 
+(defn size
+  "How many bytes `forms` take once assembled, without assembling them:
+  labels don't have to be defined. `symbols` (as for `assemble`) decide
+  which instructions get the shorter zero-page form; without them the
+  answer can be a little high, never low."
+  ([forms] (size forms {}))
+  ([forms symbols]
+   (:pc (layout (flatten-forms forms) 0 symbols))))
+
 (defn assemble
   "Assemble `forms` (see the namespace docstring) into machine code.
 

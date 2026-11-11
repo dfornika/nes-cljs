@@ -59,7 +59,7 @@
   "[[addr name] ...] for every byte of a variable."
   [{:keys [name kind type addr size]}]
   (let [base (display-name name)
-        size-of #(if (= % :u16) 2 1)]
+        size-of #(if (#{:u16 :u8.8 :s8.8} %) 2 1)]
     (case kind
       (:scalar :array) (byte-names base addr size)
       :struct (first (reduce (fn [[out at] [k t]]

@@ -44,7 +44,9 @@
     [:buttons      [:bits hw/button-bits] {:doc "Buttons held down now"}]
     [:prev-buttons [:bits hw/button-bits] {:doc "...and on the frame before"}]
     [:pressed      [:bits hw/button-bits] {:doc "Buttons that went down this frame"}]
-    [:player       {:x :u8, :y :u8}]
+    ;; fixed point (a whole byte and a fraction byte each), so it can
+    ;; move by parts of a pixel
+    [:player       {:x :u8.8, :y :u8.8}]
     [:color        :u8 {:doc "Which of `backgrounds` to show"}]
     ;; the shadow copy of sprite memory: 64 sprites x 4 bytes. It has to be
     ;; a whole page, and $0200 is where everyone puts it.
@@ -172,8 +174,8 @@
    [:bne :load-palettes]
 
    ;; Start in the middle of the screen.
-   (gen/move :player/x [:imm 120])
-   (gen/move :player/y [:imm 112])
+   (gen/move16 :player/x [:imm (gen/fixed 120)])
+   (gen/move16 :player/y [:imm (gen/fixed 112)])
 
    ;; NMI on. The NMI handler turns the picture on.
    [:lda [:imm 0x80]] [:sta :ppuctrl]])
@@ -207,14 +209,18 @@
     [:and :buttons]
     [:sta :pressed]]))
 
+(def speed
+  "How far the face moves each frame, in pixels: a pixel and a half."
+  [:imm (gen/fixed 1.5)])
+
 (def move-player
   (sub/sub
    :move-player
    "Move the player with the D-pad; A steps to the next background color."
-   [(when-button :buttons :right [:inc :player/x])
-    (when-button :buttons :left  [:dec :player/x])
-    (when-button :buttons :down  [:inc :player/y])
-    (when-button :buttons :up    [:dec :player/y])
+   [(when-button :buttons :right (gen/add16 :player/x speed))
+    (when-button :buttons :left  (gen/sub16 :player/x speed))
+    (when-button :buttons :down  (gen/add16 :player/y speed))
+    (when-button :buttons :up    (gen/sub16 :player/y speed))
     (when-button :pressed :a     [:inc :color])]))
 
 (def draw-player
@@ -227,10 +233,10 @@
   same few instructions four times with different numbers."
    (for [[i [tile dx dy]] (map-indexed vector face-sprites)
          :let [sprite [:+ :oam (* 4 i)]]]
-     [[:lda :player/y] [:clc] [:adc [:imm dy]] [:sta sprite]
+     [[:lda (gen/whole :player/y)] [:clc] [:adc [:imm dy]] [:sta sprite]
       [:lda [:imm tile]]                       [:sta [:+ sprite 1]]
       [:lda [:imm 0]]                          [:sta [:+ sprite 2]]   ; sprite palette 0
-      [:lda :player/x] [:clc] [:adc [:imm dx]] [:sta [:+ sprite 3]]])))
+      [:lda (gen/whole :player/x)] [:clc] [:adc [:imm dx]] [:sta [:+ sprite 3]]])))
 
 (def main
   [[:label :main]

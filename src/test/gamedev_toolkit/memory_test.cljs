@@ -28,6 +28,11 @@
            (select-keys (last (:variables m)) [:name :addr :hide :doc])))
     (is (= {:zero-page (- 256 8) :ram (- 0x500 48)} (:free m)))))
 
+(deftest fixed-point-types
+  (let [m (memory/allocate [[:speed :s8.8] [:player {:x :u8.8 :y :u8.8 :hp :u8}]])]
+    (is (= {:speed 0 :player 2 :player/x 2 :player/y 4 :player/hp 6} (:symbols m)))
+    (is (= [2 5] (map :size (:variables m))))))
+
 (deftest placement-options
   (testing ":in overrides where a kind of variable usually goes"
     (let [m (memory/allocate [[:big :u8 {:in :ram}] [:ptrs [:array 4 :u8] {:in :zero-page}]])]

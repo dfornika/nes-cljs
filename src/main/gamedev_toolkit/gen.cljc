@@ -13,16 +13,24 @@
   the instructions, exactly as if they'd been typed out, so a generator
   costs nothing at run time.
 
+  Generators that need labels make fresh ones on every call. So to have
+  the same code in two places, call the generator twice; putting one
+  call's result in twice would define its labels twice, and the assembler
+  will say so.
+
   Operands: where a generator reads a value (`src`), give it either an
   address (:points, 0x10) or an immediate number ([:imm 100]). Where it
   writes (`dst`), an address. 16-bit values are two bytes, low byte first,
   at addr and addr+1.
 
   Registers: the arithmetic and copying generators use A, loops count in
-  X (or Y). gamedev-toolkit.analysis/clobbers will tell you what any piece
+  X (or Y), `multiply` and `divide` use both A and X.
+  gamedev-toolkit.analysis/clobbers will tell you what any piece
   of code changes, and `times` uses it to refuse a body that would
   overwrite its own counter. `preserving` saves and restores registers
   around code, but only the ones that code actually changes."
+  ;; ClojureScript has a private helper called `divide`; ours replaces it here
+  #?(:cljs (:refer-clojure :exclude [divide]))
   (:require [gamedev-toolkit.analysis :as analysis]
             [gamedev-toolkit.asm :as asm]))
 
@@ -140,19 +148,43 @@
 (def ^:private opposite
   {:eq :ne :ne :eq :cs :cc :cc :cs :mi :pl :pl :mi :vs :vc :vc :vs})
 
-(defn- condition [c]
+(defn- condition* [c]
   (or (conditions c)
       (throw (ex-info (str "Unknown condition " (pr-str c) ". Conditions: " (sort (keys conditions))) {}))))
 
-(defn- branch-if [c] (keyword (str "b" (name (condition c)))))
-(defn- branch-unless [c] (keyword (str "b" (name (opposite (condition c))))))
+(defn- branch-if [c] (keyword (str "b" (name (condition* c)))))
+(defn- branch-unless [c] (keyword (str "b" (name (opposite (condition* c))))))
+
+;; A branch instruction can only reach about 127 bytes either way (its
+;; operand is one signed byte), a JMP anywhere. So to get past a big piece
+;; of code, these generators branch the other way around a JMP instead:
+;; 3 bytes and a few cycles more, and only when it's needed.
+
+(def ^:private branch-reach
+  "The most code (in bytes) to branch across. Sizes are counted without
+  knowing which variables are in the zero page, so they can come out a
+  little high; that only means a JMP is sometimes used a bit early."
+  120)
+
+(defn- far? [& code]
+  (> (analysis/size code) branch-reach))
+
+(defn- jump-if
+  "Go to `label` if `c` holds; `far?` if it's too far for a branch."
+  [c label far?]
+  (if far?
+    (let [stay (asm/genlabel "near")]
+      [[(branch-unless c) stay]
+       [:jmp label]
+       [:label stay]])
+    [(branch-if c) label]))
 
 (defn when-flag
   "Run `body` only if `condition` holds (see above), given the flags as
   the code just before left them."
   [condition & body]
   (let [skip (asm/genlabel "skip")]
-    [[(branch-unless condition) skip]
+    [(jump-if (opposite (condition* condition)) skip (far? body))
      body
      [:label skip]]))
 
@@ -161,7 +193,7 @@
   [condition then else]
   (let [otherwise (asm/genlabel "else")
         done (asm/genlabel "endif")]
-    [[(branch-unless condition) otherwise]
+    [(jump-if (opposite (condition* condition)) otherwise (far? then [:jmp 0]))
      then
      [:jmp done]
      [:label otherwise]
@@ -175,7 +207,7 @@
   (let [again (asm/genlabel "again")]
     [[:label again]
      body
-     [(branch-if condition) again]]))
+     (jump-if condition again (far? body))]))
 
 (defn forever
   "Run `body` over and over."
@@ -186,35 +218,57 @@
      [:jmp top]]))
 
 (defn times
-  "Run `body` `n` times (1 to 256), counting down in X. To count in Y
-  instead, give {:with :y} before the body:
+  "Run `body` `n` times, counting down in X. To count in Y instead, give
+  {:with :y} before the body:
 
     (times 8 [:asl :n])
     (times 8 {:with :y} [:lda :table :x] ...)
 
-  Inside the body the counter goes n, n-1 ... 1. The body mustn't change
-  the counter's register; that's checked when the ROM is built."
+  Up to 256 times, the counter goes n, n-1 ... 1 inside the body. More
+  than that (up to 65536) takes both X and Y to count.
+
+  The body mustn't change the registers doing the counting; that's
+  checked when the ROM is built."
   [n & body]
   (let [[opts body] (if (map? (first body)) [(first body) (rest body)] [{} body])
+        big? (and (int? n) (> n 256))
         counter (:with opts :x)
-        [load decrement] (case counter
-                           :x [:ldx :dex]
-                           :y [:ldy :dey]
-                           (throw (ex-info ":with is :x or :y" {:with counter})))
-        again (asm/genlabel "times")]
-    (when-not (and (int? n) (<= 1 n 256))
-      (throw (ex-info (str "times counts 1 to 256 times, not " (pr-str n)) {:n n})))
-    (when (contains? (analysis/clobbers body) counter)
-      (throw (ex-info (str "The body of this loop changes " (name counter) ", which is counting the loop. Count in "
-                           (if (= counter :x) "Y with {:with :y}" "X")
-                           ", or wrap the part that changes it in (preserving [" counter "] ...).")
+        counters (if big? [:x :y] [counter])
+        again (asm/genlabel "times")
+        long? (far? body)
+        changed (analysis/clobbers body)]
+    (when-not (#{:x :y} counter)
+      (throw (ex-info ":with is :x or :y" {:with counter})))
+    (when-not (and (int? n) (<= 1 n 65536))
+      (throw (ex-info (str "times counts 1 to 65536 times, not " (pr-str n)) {:n n})))
+    (when (and big? (:with opts))
+      (throw (ex-info "Counting past 256 takes both X and Y, so there's no choosing with :with" {:n n})))
+    (when-let [counter (some changed counters)]
+      (throw (ex-info (str "The body of this loop changes " (name counter) ", which is counting the loop. "
+                           (if big?
+                             "(Counting past 256 takes both X and Y.) Wrap"
+                             (str "Count in " (if (= counter :x) "Y with {:with :y}" "X") ", or wrap"))
+                           " the part that changes it in (preserving [" counter "] ...).")
                       {:counter counter})))
-    ;; 256 times: start at 0, and the first decrement wraps it to 255
-    [[load [:imm (mod n 256)]]
-     [:label again]
-     body
-     [decrement]
-     [:bne again]]))
+    (if big?
+      ;; X counts the odd ones first (or a whole 256 if there are none),
+      ;; then Y counts whole rounds of 256.
+      (let [odd (mod n 256)]
+        [[:ldx [:imm odd]]
+         [:ldy [:imm (mod (+ (quot n 256) (if (zero? odd) 0 1)) 256)]]
+         [:label again]
+         body
+         [:dex]
+         (jump-if :ne again long?)
+         [:dey]
+         (jump-if :ne again long?)])
+      (let [[load decrement] (if (= counter :x) [:ldx :dex] [:ldy :dey])]
+        ;; 256 times: start at 0, and the first decrement wraps it to 255
+        [[load [:imm (mod n 256)]]
+         [:label again]
+         body
+         [decrement]
+         (jump-if :ne again long?)]))))
 
 ;; ---------------------------------------------------------------------------
 ;; Saving registers
@@ -257,35 +311,218 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Blocks of memory. These use A and X.
+;;
+;; `LDA table,X` reaches the 256 bytes after `table`, with X as the offset.
+;; For more than that, the loop does several pages on each pass: the same
+;; X, used against table, table+256, table+512...
+
+(def ^:private most-bytes 4096)
 
 (defn- check-count [n what]
-  (when-not (and (int? n) (<= 1 n 256))
-    (throw (ex-info (str what " handles 1 to 256 bytes, not " (pr-str n)) {:n n}))))
+  (when-not (and (int? n) (<= 1 n most-bytes))
+    (throw (ex-info (str what " handles 1 to " most-bytes " bytes, not " (pr-str n)) {:n n}))))
+
+(defn- each-byte
+  "A loop over `n` bytes: (step offset) gives the instructions to handle
+  the byte at [:+ address offset], indexed by X."
+  [n step]
+  (let [pages (quot n 256)
+        odd (mod n 256)
+        whole (asm/genlabel "pages")
+        tail (asm/genlabel "bytes")]
+    [(when (pos? pages)
+       [[:ldx [:imm 0]]
+        [:label whole]
+        (for [page (range pages)] (step (* 256 page)))
+        [:inx]
+        ;; after 256, X has wrapped to 0 and INX has set the zero flag
+        [:bne whole]])
+     (when (pos? odd)
+       [[:ldx [:imm 0]]
+        [:label tail]
+        (step (* 256 pages))
+        [:inx]
+        [:cpx [:imm odd]]
+        [:bne tail]])]))
+
+(defn- offset [addr n]
+  (if (zero? n) addr [:+ addr n]))
 
 (defn fill
-  "Set `n` bytes (1 to 256) starting at `dst` to `value` (a `src`
-  operand: [:imm 0], or a variable)."
+  "Set `n` bytes starting at `dst` to `value` (a `src` operand: [:imm 0],
+  or a variable)."
   [dst n value]
   (check-count n "fill")
-  (let [again (asm/genlabel "fill")]
-    [[:lda value]
-     [:ldx [:imm 0]]
-     [:label again]
-     [:sta dst :x]
-     [:inx]
-     ;; after 256, X has wrapped to 0 and INX has set the zero flag itself
-     (when (< n 256) [:cpx [:imm n]])
-     [:bne again]]))
+  [[:lda value]
+   (each-byte n (fn [at] [:sta (offset dst at) :x]))])
 
 (defn copy
-  "Copy `n` bytes (1 to 256) from `src` to `dst` (both addresses)."
+  "Copy `n` bytes from `src` to `dst` (both addresses)."
   [dst src n]
   (check-count n "copy")
-  (let [again (asm/genlabel "copy")]
-    [[:ldx [:imm 0]]
+  (each-byte n (fn [at] [[:lda (offset src at) :x]
+                         [:sta (offset dst at) :x]])))
+
+;; ---------------------------------------------------------------------------
+;; Multiplying and dividing
+;;
+;; The 6502 can't do either, only add, subtract and shift bits left and
+;; right (which doubles and halves). So multiplying is done as on paper,
+;; in binary: for each 1 bit of one number, add the other, shifted along.
+;; Dividing is long division the same way. Both loop 8 times, about 150
+;; to 200 cycles in all, so games avoid them where a table or a shift
+;; will do.
+
+(defn multiply
+  "dst (two bytes) = a x b (one byte each; `src` operands). Uses A and X.
+  `dst` mustn't be the same variable as `b`."
+  [dst a b]
+  (let [again (asm/genlabel "multiply")
+        skip (asm/genlabel "skip")]
+    [[:lda a] [:sta (lo dst)]            ; a's bits come out of here, lowest first
+     [:lda [:imm 0]]                     ; the high byte of the answer builds up in A
+     [:ldx [:imm 8]]
+     [:lsr (lo dst)]
      [:label again]
-     [:lda src :x]
-     [:sta dst :x]
-     [:inx]
-     (when (< n 256) [:cpx [:imm n]])
-     [:bne again]]))
+     [:bcc skip]                         ; this bit of a is 0: nothing to add
+     [:clc] [:adc b]
+     [:label skip]
+     [:ror :a]                           ; shift the 16-bit answer right, as the
+     [:ror (lo dst)]                     ; next bit of a comes out
+     [:dex]
+     [:bne again]
+     [:sta (hi dst)]]))
+
+(defn divide
+  "quotient = a / b, rounded down (one byte each; a and b are `src`
+  operands). The remainder is left in A, and stored in `remainder` if one
+  is given. Uses A and X. Dividing by zero gives 255, remainder a."
+  ([quotient a b] (divide quotient a b nil))
+  ([quotient a b remainder]
+   (let [again (asm/genlabel "divide")
+         fits (asm/genlabel "fits")
+         skip (asm/genlabel "skip")]
+     [[:lda a] [:sta quotient]           ; a's bits come out the top of here...
+      [:lda [:imm 0]]                    ; ...into A, the part being divided
+      [:ldx [:imm 8]]
+      [:label again]
+      [:asl quotient]
+      [:rol :a]
+      [:bcs fits]                        ; (A overflowed: it's certainly big enough)
+      [:cmp b]
+      [:bcc skip]                        ; b doesn't go into it
+      [:label fits]
+      [:sbc b]                           ; it does: take it away,
+      [:inc quotient]                    ; and that's a 1 in the answer
+      [:label skip]
+      [:dex]
+      [:bne again]
+      (when remainder [:sta remainder])])))
+
+(defn- bits-of
+  "The binary digits of `n`, highest first: 5 -> [1 0 1]."
+  [n]
+  (loop [n n, out ()]
+    (if (zero? n) (vec out) (recur (quot n 2) (cons (mod n 2) out)))))
+
+(defn multiply-a
+  "A = A x `n`, for a number known when the ROM is built (0 to 255),
+  using shifts and adds, which is much quicker than `multiply`. The answer
+  wraps past 255. Unless `n` is a power of two (2, 4, 8...), it needs a
+  byte to work in: give a variable as `scratch`."
+  ([n] (multiply-a n nil))
+  ([n scratch]
+   (when-not (and (int? n) (<= 0 n 255))
+     (throw (ex-info (str "multiply-a multiplies by 0 to 255, not " (pr-str n)) {:n n})))
+   (let [[_ & more] (bits-of n)]
+     (cond
+       (zero? n) [[:lda [:imm 0]]]
+       (every? zero? more) (vec (repeat (count more) [:asl :a]))
+       (nil? scratch) (throw (ex-info (str "Multiplying by " n " needs a scratch variable: (multiply-a " n " :some-variable)") {:n n}))
+       ;; A x 5 (binary 101) = ((A x 2) x 2) + A: double for every bit, and
+       ;; add the original for every 1
+       :else [[:sta scratch]
+              (for [bit more]
+                [[:asl :a]
+                 (when (= 1 bit) [[:clc] [:adc scratch]])])]))))
+
+(defn divide-a
+  "A = A / `n`, rounded down, for `n` a power of two (2, 4, 8... 128):
+  shifting right halves a number. For other divisors, use `divide` (its
+  divisor can be [:imm n])."
+  [n]
+  (let [bits (when (and (int? n) (<= 1 n 128)) (bits-of n))]
+    (when-not (and bits (every? zero? (rest bits)))
+      (throw (ex-info (str "divide-a divides by a power of two, not " (pr-str n) ". For other numbers use divide.") {:n n})))
+    (vec (repeat (dec (count bits)) [:lsr :a]))))
+
+;; ---------------------------------------------------------------------------
+;; Signed numbers
+;;
+;; A byte can be read as 0 to 255, or as -128 to 127 ('signed': 255 is
+;; -1, 254 is -2...). Adding and subtracting work the same either way, so
+;; `add` and `add16` need no signed versions. Comparing doesn't: as
+;; unsigned numbers 255 > 1, as signed ones -1 < 1.
+
+(defn compare-signed
+  "Compare two signed bytes. Afterwards the negative flag says a < b:
+
+    (when-flag :negative ...)  a < b      (when-flag :positive ...)  a >= b
+
+  (It subtracts; the overflow flag says when the sign of the result is
+  wrong, and the EOR puts it right.) The zero flag isn't reliable here:
+  for equality use an ordinary CMP. Uses A."
+  [a b]
+  (let [ok (asm/genlabel "signed")]
+    [[:sec] [:lda a] [:sbc b]
+     [:bvc ok]
+     [:eor [:imm 0x80]]
+     [:label ok]]))
+
+(defn compare16-signed
+  "Compare two signed 16-bit values; the negative flag says a < b, as
+  for `compare-signed`."
+  [a b]
+  (let [ok (asm/genlabel "signed")]
+    [[:lda (lo a)] [:cmp (lo b)]         ; just for the borrow into the high bytes
+     [:lda (hi a)] [:sbc (hi b)]
+     [:bvc ok]
+     [:eor [:imm 0x80]]
+     [:label ok]]))
+
+(defn add-signed-byte
+  "dst (two bytes) = dst + src, where src is one signed byte (-128 to
+  127): a small step forwards or backwards. Uses A."
+  [dst src]
+  (let [forwards (asm/genlabel "forwards")
+        done (asm/genlabel "done")]
+    [[:lda src]
+     [:bpl forwards]
+     [:dec (hi dst)]                     ; a negative byte is the same bits as (byte - 256)
+     [:label forwards]
+     [:clc] [:adc (lo dst)] [:sta (lo dst)]
+     [:bcc done]
+     [:inc (hi dst)]
+     [:label done]]))
+
+;; ---------------------------------------------------------------------------
+;; Fixed point
+;;
+;; To move 1.5 pixels a frame, a position needs a fraction. The usual
+;; trick: keep it as a 16-bit number of 256ths of a pixel. The high byte
+;; is then the whole pixel (what the PPU wants) and the low byte the
+;; fraction, and ordinary 16-bit adds do the arithmetic. gamedev-toolkit
+;; .memory's :u8.8 and :s8.8 types are for these.
+
+(defn fixed
+  "A number as 8.8 fixed point, for immediates: (fixed 1.5) => 384, so
+  (add16 :player/x [:imm (fixed 1.5)]) moves 1.5 to the right. Negative
+  numbers work too."
+  [x]
+  (bit-and (int (Math/round (double (* x 256)))) 0xFFFF))
+
+(defn whole
+  "The operand for the whole-number byte of the 8.8 fixed-point variable
+  at `addr` (its second byte): [:lda (whole :player/x)]"
+  [addr]
+  (hi addr))
