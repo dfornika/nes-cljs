@@ -2,8 +2,11 @@
 
 Notes from a conversation about where NES.cljs could go: writing an NES
 game in ClojureScript and building it into a `.nes` ROM that runs here or
-in any other emulator. Nothing here is built yet; this is thinking out
-loud, to come back to.
+in any other emulator. This is thinking out loud, to come back to.
+
+Built so far (see "Making games" in `TODO.md`): layer 1, as the
+`gamedev-toolkit` library (`src/main/gamedev_toolkit`), and the first
+milestone, `src/main/games/hello.cljc`.
 
 ## The question
 
@@ -41,7 +44,7 @@ Computer Programs* builds things up (see "The SICP connection" below).
 1. **Instructions as data.** `[:lda 0x10]`, `[:sta :player-x]`. An assembler
    turns a vector of these into bytes, with labels and the iNES header. This
    is the only layer that knows opcodes. (We already have the opcode table,
-   for the disassembler: `src/main/nes/cpu/opcodes.cljs`.)
+   for the disassembler: `src/main/nes/cpu/opcodes.cljc`.)
 2. **Code generators.** Functions that return instructions, and so compose
    like any other function: `(add16 :score :points)`, `(times 8 body)`.
 3. **Subroutines.** Generated code called with `JSR`, defined once, with

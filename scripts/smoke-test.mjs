@@ -97,13 +97,36 @@ try {
   });
 
   // Each sample ROM should draw something: more than one color on screen.
-  for (const rom of ['Thwaite', '240p Test Suite', 'Concentration Room']) {
+  // ("Hello" isn't a file: the page assembles it from ClojureScript data.)
+  for (const [rom, file] of [['Hello', 'hello'], ['Thwaite', 'thwaite'], ['240p Test Suite', '240pee'],
+                             ['Concentration Room', 'croom']]) {
     await step(`${rom} draws`, async () => {
       await page.click('button:text-is("Sample ROMs ▾")');
       await page.click(`button:text-is("${rom}")`);
-      await page.waitForSelector(`.rom-name:has-text("${rom === 'Thwaite' ? 'thwaite' : rom === '240p Test Suite' ? '240pee' : 'croom'}")`);
+      await page.waitForSelector(`.rom-name:has-text("${file}")`);
       const colors = await until(async () => { const n = await colorsOnScreen(); return n > 1 && n; });
       check(true, `${rom} draws to the screen (${colors} colors)`);
+    });
+    if (rom === 'Hello') await step('Hello responds to the controller', async () => {
+      // The face is the only yellow on the canvas. Its left edge moves
+      // right while Right is held.
+      const faceLeft = () => page.evaluate(() => {
+        const c = document.querySelector('canvas');
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let left = null;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] > 180 && d[i + 1] > 150 && d[i + 2] < 120) {
+            const x = (i / 4) % c.width;
+            if (left === null || x < left) left = x;
+          }
+        }
+        return left;
+      });
+      const x0 = await until(async () => { const v = await faceLeft(); return v !== null && v; });
+      await page.keyboard.down('ArrowRight');
+      const x1 = await until(async () => { const v = await faceLeft(); return v > x0 + 8 && v; });
+      await page.keyboard.up('ArrowRight');
+      check(true, `Hello: holding Right moves the face (x ${x0} → ${x1})`);
     });
   }
 

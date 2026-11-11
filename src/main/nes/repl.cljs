@@ -34,9 +34,14 @@
     (lens! \"Player\" {:lives [:u8 0x075A]})  ; try out a lens; it shows in the Lens tab
     (lens-source \"Player\")   ; print it as code to paste into a file
 
+    (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
+    (asm/assemble [[:lda [:imm 1]] [:rts]])   ; the assembler by itself
+
   Reading never has side effects: `rd` on an I/O register like $2002
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
+            [gamedev-toolkit.asm :as asm]
+            [games.hello :as hello]
             [nes.console :as console]
             [nes.breakpoints :as bp]
             [nes.code-log :as code-log]
@@ -361,3 +366,17 @@
   "Send a snapshot to `tap>` (for Portal or another data browser)."
   []
   (tap> (snap)))
+
+;; ---------------------------------------------------------------------------
+;; Games built here
+
+(defn play!
+  "Put a cartridge built with gamedev-toolkit into the console and start
+  it: (play! (hello/build)). Takes what a game's `build` returns (a map
+  with :rom, the .nes file's bytes, and maybe :name), or just the bytes.
+  Returns the ROM's size in bytes."
+  [built]
+  (let [bytes (if (map? built) (:rom built) built)
+        rom-name (or (when (map? built) (:name built)) "built.nes")]
+    (console/load-bytes! rom-name (js/Uint8Array.from (clj->js bytes)))
+    (count bytes)))

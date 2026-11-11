@@ -22,11 +22,18 @@
             [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db dev-tools]]
             [nes.tiles-view :refer [tiles-view]]
+            [games.hello :as hello]
             [nes.touchpad :as touchpad]
             [nes.ui :as ui]))
 
 (def sample-roms
-  [{:name "Concentration Room"
+  [{:name "Hello"
+    ;; no file: built in the page, from ClojureScript data, when clicked
+    :build hello/build
+    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/hello.cljc"
+    :blurb "A face you can move with the D-pad; A changes the background. Assembled right here in the page when you click."
+    :credit "written in ClojureScript, for NES.cljs"}
+   {:name "Concentration Room"
     :url "roms/croom/croom.nes"
     :about "roms/croom/README.html"
     :blurb "A card-matching game. Flip two cards; keep them if they match."
@@ -256,12 +263,15 @@
    [:h3 {:style {:margin-top 0}} "Sample ROMs"]
    [:p {:style {:color "#57606a" :font-size "13px"}}
     "Homebrew games and programs, free to share."]
-   (for [{:keys [name url about blurb credit]} sample-roms]
-     ^{:key url}
+   (for [{:keys [name url build about blurb credit]} sample-roms]
+     ^{:key name}
      [:div {:style {:margin-bottom "12px"}}
       [:button {:on-click (fn []
                             (hide-popover! "samples-menu")
-                            (console/load-url! url))
+                            (if build
+                              (let [built (build)]
+                                (console/load-bytes! (:name built) (js/Uint8Array.from (clj->js (:rom built)))))
+                              (console/load-url! url)))
                 :style {:font-weight "bold"}}
        name]
       [:div {:style {:font-size "13px" :margin-top "3px"}} blurb]

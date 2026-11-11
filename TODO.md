@@ -149,15 +149,36 @@ played. So combine them.
 
 ## Making games (Phases 4 and 5)
 
-- [ ] **Assembler** – 6502 assembly as Clojure data (`[:lda :imm 0x01]`), labels,
-  using `nes.cpu.opcodes/opcode-for`
-- [ ] **ROM builder** – pack PRG + CHR + iNES header into a `.nes` file in the browser
-  and load it straight into the emulator
+The plan is in `docs/clojurescript_game_dev_notes.md`. The game-making code
+is its own library, `gamedev-toolkit` (in `src/main/gamedev_toolkit`, all
+`.cljc`): it depends on nothing in `nes.*` but the opcode table, so it can
+move to its own repository once its API settles. Games are in
+`src/main/games`.
+
+- [x] **Assembler** – `gamedev-toolkit.asm`: 6502 assembly as Clojure data
+  (`[:lda [:imm 1]]`, `[:sta :player-x]`, `[:lda :table :x]`), labels, expressions,
+  `:db` / `:dw` / `:org`, a listing; errors that name the form
+- [x] **ROM builder** – `gamedev-toolkit.rom`: PRG + CHR + iNES header into a `.nes`
+  file (NROM), loaded straight into the emulator with `(play! ...)`
+- [x] **Tiles as text** – `gamedev-toolkit.chr`: draw tiles as strings of `. 1 2 3`
+- [x] **Hello world** – `games.hello`: a face to move around, built entirely from
+  ClojureScript; in the Sample ROMs menu, assembled in the page
+- [x] **Run routines without a console** – `nes.cpu.harness/run-routine`: assembled code
+  on the ClojureScript CPU in `npm test`, with cycle counts
+- [ ] **Memory and symbols** (next) – a `defvars` allocator that places variables and
+  emits the game's lens and labels: `STA player-x` in the disassembly, breakpoints by name
+- [ ] **Generators and subroutines** – `add16`, `times`, `defsub`; what each clobbers,
+  as data; property tests (test.check) against plain Clojure functions
+- [ ] **Runtime skeleton** – reset/init, NMI handler, controller, sprite buffer, a queue of
+  video memory writes, the state machine; then a first real game (single screen)
+- [ ] **Download the built ROM** as a `.nes` file, and build from the command line
+  (the toolkit runs on JVM Clojure too)
 - [ ] **CHR tile editor** – paint tiles in the Tiles view and write them back into a ROM
-- [ ] **Hello world** – a tiny homebrew ROM built entirely from ClojureScript
+- [ ] **Assets as data** – palettes, screens and levels as EDN
+- [ ] **Engine pieces** – metasprites, metatiles, collision, scrolling, sound, a second mapper
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the
   assembler from the page
-- [ ] **A small DSL and game engine** – functions and macros that generate 6502 code
+- [ ] **A small language** of expressions and typed variables that compiles to generators
 
 ## Housekeeping
 
