@@ -134,7 +134,10 @@ played. So combine them.
 - [x] **More sample ROMs** – Thwaite, 240p Test Suite
 - [x] **Zipped ROMs** – .zip (pick between several ROMs in one) and .gz
 - [ ] **Keyboard shortcuts** for big screen / full screen / pause
-- [ ] **Remember the layout** (big screen, drawer height, tab) between visits
+- [x] **A divider between the screen and the inspectors** – drag it sideways (or arrow keys);
+  double-click to reset; remembered between visits. With room, the CPU tab's stack sits
+  beside the instructions
+- [ ] **Remember the rest of the layout** (big screen, drawer height, tab) between visits
 
 ## Our own emulator core (Phase 3)
 

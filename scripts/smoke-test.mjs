@@ -96,6 +96,22 @@ try {
     check(scrollH <= viewH, `the page fits the window (${scrollH} <= ${viewH})`);
   });
 
+  await step('divider', async () => {
+    // Dragging the bar between the screen and the inspectors resizes
+    // them; a double-click puts it back.
+    const inspectorWidth = () => page.locator('.inspector').evaluate(e => e.getBoundingClientRect().width);
+    const w0 = await inspectorWidth();
+    const bar = await page.locator('.splitter').boundingBox();
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bar.x + bar.width / 2 - 200, bar.y + bar.height / 2, {steps: 5});
+    await page.mouse.up();
+    const w1 = await until(async () => { const w = await inspectorWidth(); return w > w0 + 150 && w; });
+    await page.locator('.splitter').dblclick();
+    await until(async () => Math.abs(await inspectorWidth() - w0) < 2);
+    check(true, `divider: dragging it resizes the inspectors (${Math.round(w0)}px → ${Math.round(w1)}px), double-click resets`);
+  });
+
   // Each sample ROM should draw something: more than one color on screen.
   // ("Hello" isn't a file: the page assembles it from ClojureScript data.)
   for (const [rom, file] of [['Hello', 'hello'], ['Thwaite', 'thwaite'], ['240p Test Suite', '240pee'],

@@ -136,13 +136,19 @@
                                      (when (not= plain (disasm/operand-text instr name-of))
                                        (str "\nThe address is " plain)))))}
                 [mnemonic-link instr name-of]]
-               ;; one line each, so the listing keeps its height as the game runs
-               [:td {:style {:padding "1px 6px" :color (if (= state :next) "#24292f" "#57606a")
-                             :font-size "12px" :white-space "nowrap"}}
-                ;; the instruction about to run, with the actual addresses and values
-                (ref/explain instr (when (= state :next) {:regs regs :peek peek}))]])
+               ;; One line each, so the listing keeps its height as the game
+               ;; runs. This column takes whatever width is left (width
+               ;; 100% with max-width 0 does that in a table) and cuts its
+               ;; text short to fit; the whole text is in the tooltip.
+               (let [words (ref/explain instr (when (= state :next) {:regs regs :peek peek}))]
+                 [:td {:title words
+                       :style {:padding "1px 6px" :color (if (= state :next) "#24292f" "#57606a")
+                               :font-size "12px" :white-space "nowrap"
+                               :width "100%" :max-width 0 :overflow "hidden" :text-overflow "ellipsis"}}
+                  ;; the instruction about to run, with the actual addresses and values
+                  words])])
         blanks (- console/recent-steps-kept (count done))]
-    [:table {:style {:border-collapse "collapse" :font-size "13px"}}
+    [:table {:style {:border-collapse "collapse" :font-size "13px" :width "100%"}}
      [:thead
       [:tr
        [th "" ""]
@@ -350,12 +356,15 @@
        [:div {:style (merge muted mono {:font-size "12px" :margin "-8px 0 16px"})}
         "Frame " frame " · scanline " scanline " · dot " dot " · CPU cycle " cycles
         (when (<= 241 scanline 260) " · in vertical blank")]
-       [:div {:style {:display "flex" :gap "32px" :flex-wrap "wrap"}}
-        [section "Instructions"
-         [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px"})}
-          "The highlighted one runs next. Click an instruction's name for what it does, or a ● to stop there."]
-         [code-listing emulator pc regs]]
-        [:div
+       ;; Side by side when the panel is wide enough for both (drag the bar
+       ;; beside the screen to make it so); otherwise the stack goes below.
+       [:div {:style {:display "flex" :gap "8px 32px" :flex-wrap "wrap"}}
+        [:div {:style {:flex "1 1 430px" :min-width 0}}
+         [section "Instructions"
+          [:div {:style (merge muted {:font-size "12px" :margin-bottom "4px"})}
+           "The highlighted one runs next. Click an instruction's name for what it does, or a ● to stop there."]
+          [code-listing emulator pc regs]]]
+        [:div {:style {:flex "none"}}
          [section "Stack" [stack-view emulator sp (debug-info/table-for (get-in @db [:rom :sha1]))]]
          [section "Interrupt vectors" [vector-table emulator]]]]
        [section "Breakpoints" [breakpoints-panel]]])
