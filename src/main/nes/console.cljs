@@ -148,6 +148,10 @@
   []
   (some-> @emulator emu/code-log))
 
+;; Bumped after every frame, but only while something needs to keep up
+;; with every frame (an overlay is showing: see nes.overlay-view).
+(defonce frame-tick (r/atom 0))
+
 (defn refresh-inspectors!
   ([] (refresh-inspectors! :tick))
   ([kind]
@@ -224,6 +228,8 @@
                          (or (emu/frame! @emulator) (recur (dec n)))))]
           (stop-at-breakpoint! hit)
           (do
+            (when (and (pos? frames) (seq (:overlays @db)))
+              (swap! frame-tick inc))
             (when (>= (- ts @last-inspect) inspect-interval-ms)
               (reset! last-inspect ts)
               (refresh-inspectors!))
@@ -474,6 +480,7 @@
                :rom {:name rom-name :size (.-length bytes) :header header
                      :sha1 (rom/rom-hash bytes)}
                :status :paused
+               :overlays #{}
                :error nil)
         (resume!))
       (catch :default err

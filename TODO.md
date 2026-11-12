@@ -61,6 +61,22 @@ committed to; pick whatever looks fun.
 
 ## Debugging tools
 
+- [x] **Overlays** – `nes.overlay`: shapes (boxes, lines, circles, text) drawn over the game's
+  picture from lens values, as data; checkboxes under the screen; `(overlay! name fields draw)`
+  at the REPL. "Sprites" boxes every sprite in any game; a game built here can bring its own
+  (Catch the Stars shows the squares it compares to decide what's touching)
+- [ ] **Overlay follow-ups** – overlays for the lenses we have (Mega Man 2 and Zelda keep
+  positions in known places); the 8-sprites-per-line limit and sprite 0 hit as overlays; a
+  trail of where something has been; click a shape to open its lens field or set a breakpoint
+- [ ] **A way out to the host** – let a game call ClojureScript while it runs, for logging,
+  assertions in tests, and trying out logic before writing it in 6502. Two ways, both worth having:
+  (1) a debug port: a write to an unused address ($4018-$401F do nothing on a real NES), which
+  the emulator notices. The ROM still runs anywhere else, the hook just doesn't fire.
+  (2) a host-call opcode: one of the 12 that jam a real 6502 ($02, $12, $22...), followed by a
+  byte saying which function. The emulator runs the function and carries on. More powerful
+  (it can stand in for a whole routine) but the ROM only runs here, so builds must be able to
+  refuse or strip it. Start with (1) in `nes.cpu.harness`, where it's a few lines
+
 - [x] **Breakpoints** – execute / read / write / access, address ranges, a value to match,
   conditions from the REPL; gutter dots in the CPU tab, "on write" buttons in the Memory
   and Lens tabs; `break!` / `breaks` / `unbreak!` / `why` / `continue!`
@@ -195,6 +211,9 @@ move to its own repository once its API settles. Games are in
   `:s8.8` variables, shown and edited as decimals in the Lens tab; `gen/fixed`, `gen/whole`);
   `fill` / `copy` up to 4 KB and `times` up to 65536; loops and conditions switch to a `JMP`
   by themselves when the body is too big for a branch; `analysis/size` counts bytes
+- [x] **Tail calls** – a subroutine that ends by calling another jumps to it instead (`JSR` +
+  `RTS` becomes `JMP`): a byte smaller, 9 cycles quicker, and no stack used, so chains of them
+  can be any length. Done by `sub/link`
 - [ ] **Simple optimizations** – e.g. drop a `LDA x` straight after `STA x`
 - [ ] **Cycle counts without running** – for straight-line code, from the opcode table (for
   now, `nes.cpu.harness/run-routine` runs the code and reports the cycles it took)
@@ -233,11 +252,55 @@ move to its own repository once its API settles. Games are in
 - [ ] **Tile editor follow-ups** – undo; copy and paste tiles; flip and shift; paint with the
   palette the tile is drawn with on screen; games whose mappers switch 1 KB or 2 KB of tiles
   at a time (changes there stay in the PPU's memory only)
+- [x] **The ladder** – `games.ladder`: five tiny programs, each a rung above the last, from
+  `nil` (one instruction, 3 bytes: a valid cartridge that does nothing) through `color`,
+  `pulse` (the smallest game loop), `pad` and `sprite`, each adding one idea and one piece of the
+  toolkit. In the Sample ROMs menu; `(play! (ladder/build :nil))`
+- [ ] **Ladder follow-ups** – a page that shows a rung's source beside it running; more rungs
+  (a background, sound, scrolling); the same for the toolkit's layers (assembler → generators →
+  subroutines → runtime)
 - [ ] **Engine pieces** – metatiles, collision with the background, scrolling, sound, object
   slots with spawn and despawn, animation, a second mapper
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the
   assembler from the page
 - [ ] **A small language** of expressions and typed variables that compiles to generators
+
+## Ideas from SICP
+
+Things that came up reading *Structure and Interpretation of Computer Programs* beside this
+project. The rule for when one gets built: it helps make or debug the next thing on the engine
+plan, or it's an afternoon. Otherwise it waits here.
+
+- [ ] **A state as an address** – SICP's register machines keep 'where to go next' in a
+  `continue` register. The 6502 version: a state is the address of its code, a transition
+  stores a new address, and the dispatch is `JMP (state)`. It replaces the runtime's chain of
+  compares. Worth doing when a game has more than a handful of states; the debugger can still
+  show the state by name, from the symbol table
+- [ ] **Scripts that pause** (coroutines) – the useful form of continuations on this machine.
+  An object's behaviour written as a sequence ("walk left for 30 frames, wait, shoot, repeat"),
+  with a `yield` that saves where to resume next frame in the object's slot. No heap: one
+  address per object. Do it with object slots, in the engine work
+- [ ] **Full continuations** (`call/cc`) would mean copying the stack. With 256 bytes of it
+  and no heap, not on the 6502; the two items above get the useful parts
+- [ ] **Calling conventions** – arguments here go in registers or variables, so there's
+  nothing for a callee to clean up. It would matter with a software stack for arguments (as
+  cc65 has), which costs enough cycles that games avoid it
+- [ ] **A pool of objects** – what games use where other programs use a heap: a fixed number
+  of slots (a structure of arrays) and a free list. Spawn and despawn, no fragmentation. In
+  the engine work
+- [ ] **A priority queue** – MagerValp's AsmHeap is this (a binary min-heap of bytes in 128
+  bytes, push and pop), not a memory allocator. As a generator it could order sprites by
+  depth, or schedule "do this in N frames"
+- [ ] **Pairs and garbage collection** – SICP 5.3 builds lists from two arrays, `the-cars` and
+  `the-cdrs`, and collects garbage by copying. That's `[:soa n {:car :u8 :cdr :u8}]` here. A
+  list memory with a stop-and-copy collector you can watch in the Memory tab would be a fine
+  thing to learn from, and no use at all to a game
+- [ ] **An evaluator on the NES** – SICP 5.4's explicit-control evaluator, written with the
+  toolkit: a tiny Lisp running on the 6502, with the debugger showing `exp`, `env`, `val`
+  and `continue`. Needs the item above. The far end of this road
+- [ ] **A small language that compiles to generators** (layer 7 in the notes) – SICP 5.5's
+  compiler is the model: functions returning instruction sequences, combined with
+  `preserving`, which `gamedev-toolkit.gen` already has
 
 ## Running outside the browser
 
@@ -263,6 +326,9 @@ a JVM emulator could reuse it one day.
 
 ## Housekeeping
 
+- [ ] **A name** – "meta-nes" (after the Super NES, and Lisp's metacircular evaluator) is the
+  candidate. Renaming moves the site's address, so do it once, perhaps when the toolkit
+  becomes its own library and needs a name too
 - [ ] Performance check: how much does the bus monitor cost? Consider a Web Worker
   for emulation if the UI gets heavy
 - [x] CI: unit tests, release build and a browser smoke test on every push and PR

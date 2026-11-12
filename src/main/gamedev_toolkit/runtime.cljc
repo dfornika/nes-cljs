@@ -478,9 +478,12 @@
                 (see gamedev-toolkit.palette)
     :screens    {name screen}: backgrounds (see gamedev-toolkit.screen), drawn
                 with (background name) inside draw-screen
+    :overlays   [{:name :doc :draw (fn [variables] shapes)} ...]: things for a
+                debugger to draw over the picture, from the game's variables
+                (NES.cljs: see nes.overlay). Passed through as they are
 
   Returns what rom/nrom returns, with :name."
-  [{:keys [name states initial variables tiles palettes screens]}]
+  [{:keys [name states initial variables tiles palettes screens overlays]}]
   (let [states (vec states)
         state-names (mapv first states)
         _ (when-not (some #{initial} state-names)
@@ -509,4 +512,5 @@
                                                    state-names)))
              :memory (memory/allocate (concat (runtime-variables state-names) variables))
              :chr (chr/bank tiles)})
-           :name name)))
+           :name name
+           :overlays overlays)))
