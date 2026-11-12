@@ -44,3 +44,27 @@
   ;; 0x00BBGGRR: red in the low byte
   (is (= "rgb(255,0,0)" (chr/bgr->css 0x0000FF)))
   (is (= "rgb(0,0,255)" (chr/bgr->css 0xFF0000))))
+
+(deftest painting
+  (let [mem (mem-with 0x10 (repeat 16 0))
+        write! (fn [writes] (doseq [[a v] writes] (bytes/put! mem a v)))]
+    (testing "a pixel's color is a bit in each of two bytes"
+      (is (= [[0x12 0x10] [0x1A 0x10]] (chr/pixel-writes mem 0x10 3 2 3)) "color 3: both planes")
+      (is (= [[0x12 0x10] [0x1A 0x00]] (chr/pixel-writes mem 0x10 3 2 1)) "color 1: the low plane")
+      (is (= [[0x12 0x00] [0x1A 0x10]] (chr/pixel-writes mem 0x10 3 2 2)) "color 2: the high plane"))
+    (write! (chr/pixel-writes mem 0x10 3 2 3))
+    (write! (chr/pixel-writes mem 0x10 0 0 1))
+    (write! (chr/pixel-writes mem 0x10 7 7 2))
+    (is (= 3 (chr/pixel mem 0x10 3 2)))
+    (testing "other pixels in the row are left alone"
+      (write! (chr/pixel-writes mem 0x10 4 2 1))
+      (is (= [3 1] [(chr/pixel mem 0x10 3 2) (chr/pixel mem 0x10 4 2)]))
+      (write! (chr/pixel-writes mem 0x10 3 2 0))
+      (is (= [0 1] [(chr/pixel mem 0x10 3 2) (chr/pixel mem 0x10 4 2)])))
+    (testing "as text, and back from text"
+      (is (= ["1......." "........" "....1..." "........" "........" "........" "........" ".......2"]
+             (chr/tile-text mem 0x10)))
+      (write! (chr/text-writes 0x20 ["33333333" "........" "........" "........" "........" "........" "........" "12121212"]))
+      (is (= [3 3 3 3 3 3 3 3] (first (chr/tile-pixels mem 0x20))))
+      (is (= [1 2 1 2 1 2 1 2] (last (chr/tile-pixels mem 0x20))))
+      (is (= 16 (count (chr/text-writes 0x20 (chr/tile-text mem 0x20))))))))

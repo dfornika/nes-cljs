@@ -38,6 +38,8 @@
     (play! (catch/build))    ; a whole game: src/main/games/catch.cljc
     (save! (catch/build))    ; ...downloaded as a .nes file
     (save-edn!)              ; the loaded game's program, as EDN text you can read
+    (tile 0x2A)              ; a tile, as text: [\"..1111..\" ...]
+    (tile! 0x2A [\"..1111..\" ...])   ; ...and drawn from text (or paint in the Tiles tab)
     (syms)                   ; a game built here has names: its labels and variables
     (rd :player/x)           ; ...which work wherever an address does
     (break! :write :color) (dis :main)
@@ -51,6 +53,7 @@
             [games.hello :as hello]
             [nes.console :as console]
             [nes.breakpoints :as bp]
+            [nes.chr :as chr]
             [nes.code-log :as code-log]
             [nes.cpu.disasm :as disasm]
             [nes.debug-info :as debug-info]
@@ -438,3 +441,24 @@
   (save-edn! :source) or (save-edn! :container)."
   ([] (or (save-edn! :source) (save-edn! :container)))
   ([kind] (workbench/save-edn! (:rom @db) kind)))
+
+;; ---------------------------------------------------------------------------
+;; Tiles
+
+(defn tile
+  "Tile `n` (0-255) of pattern table `table` (0 or 1; default 0), as the
+  PPU sees it now, as 8 strings of . 1 2 3: the way gamedev-toolkit.chr
+  draws tiles."
+  ([n] (tile 0 n))
+  ([table n]
+   (chr/tile-text (emu/ppu-memory (emulator)) (chr/tile-address table n))))
+
+(defn tile!
+  "Redraw tile `n` of pattern table `table` (default 0) from 8 strings of
+  . 1 2 3, in the running game. Returns :rom if the change went into the
+  cartridge too (so it's in the ROM you download), or :live if only into
+  the PPU's memory (games that keep tiles in RAM or switch banks)."
+  ([n rows] (tile! 0 n rows))
+  ([table n rows]
+   (emulator)
+   (console/poke-tiles! (chr/text-writes (chr/tile-address table n) rows))))

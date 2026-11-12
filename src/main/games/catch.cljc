@@ -10,9 +10,11 @@
   and transitions between them. The
   runtime does the rest: reading the controller, sending sprites to the
   PPU, and so on. At the REPL: (play! (catch/build))."
-  (:require [gamedev-toolkit.chr :as chr]
-            [gamedev-toolkit.font :as font]
+  (:require [gamedev-toolkit.font :as font]
             [gamedev-toolkit.gen :as gen]
+            [gamedev-toolkit.palette :as palette]
+            [gamedev-toolkit.screen :as screen]
+            [gamedev-toolkit.tileset :as tileset]
             [gamedev-toolkit.runtime :as rt :refer [transition]]
             [gamedev-toolkit.sub :as sub :refer [call]]))
 
@@ -84,26 +86,123 @@
    "..1....11....1.."
    ".......11......."])
 
+(def wall
+  ["1111111111111111"
+   "1222222212222222"
+   "1222222212222222"
+   "1222222212222222"
+   "1111111111111111"
+   "2222122222221222"
+   "2222122222221222"
+   "2222122222221222"
+   "1111111111111111"
+   "1222222212222222"
+   "1222222212222222"
+   "1222222212222222"
+   "1111111111111111"
+   "2222122222221222"
+   "2222122222221222"
+   "2222122222221222"])
+
+(def twinkle
+  ["........"
+   "...2...."
+   "..212..."
+   "...2...."
+   "........"
+   "........"
+   "........"
+   "........"])
+
 (def tiles
-  "The font first (so tile 0 is a blank space, and `rt/text` works), then
-  the three pictures, four tiles each."
-  (vec (concat font/tiles (chr/tiles face) (chr/tiles star) (chr/tiles spike))))
+  "Every tile in the cartridge, by name. The font comes first, so tile 0
+  is a blank space."
+  (tileset/tileset [[:font    font/tiles]
+                    [:face    face]
+                    [:star    star]
+                    [:spike   spike]
+                    [:wall    wall]
+                    [:twinkle twinkle]]))
 
-;; Each picture is 2 tiles by 2; these are its four sprites, and which
-;; sprite palette they use.
-(def first-picture (count font/tiles))
-(def face-sprites  (rt/picture first-picture 2 2 0))
-(def star-sprites  (rt/picture (+ first-picture 4) 2 2 1))
-(def spike-sprites (rt/picture (+ first-picture 8) 2 2 2))
+;; Each picture is 16x16: four sprites, drawn with one of the sprite palettes.
+(def face-sprites  (tileset/sprites tiles :face 0))
+(def star-sprites  (tileset/sprites tiles :star 1))
+(def spike-sprites (tileset/sprites tiles :spike 2))
 
-;; Colors are numbers from the NES's fixed set of 64 (see the Palettes tab).
 (def palettes
-  (let [bg 0x02]                           ; dark blue
-    [bg 0x30 0x10 0x00,  0 0 0 0,  0 0 0 0,  0 0 0 0    ; background: white text
-     bg 0x0F 0x28 0x30                                  ; the face: black, yellow, white
-     0  0x27 0x38 0x30                                  ; the star: orange, pale yellow
-     0  0x0F 0x16 0x30                                  ; the spike: black, red, white
-     0 0 0 0]))
+  (palette/palettes
+   {:backdrop   :dark-indigo
+    :background [[:white :light-gray :gray]            ; text, and the twinkles
+                 [:black :dark-rose :rose]]            ; the wall
+    :sprites    [[:black :light-yellow :white]         ; the face
+                 [:light-orange :pale-yellow :white]   ; the star
+                 [:black :red :white]]}))              ; the spike
+
+;; ---------------------------------------------------------------------------
+;; Backgrounds
+;;
+;; A screen is 16 blocks across and 15 down; each character below is one
+;; 16x16 block (see gamedev-toolkit.screen).
+
+(def metatiles
+  (let [twinkle (tileset/tile tiles :twinkle)]
+    {:sky      {:tiles [0 0 0 0] :palette 0}
+     :twinkle  {:tiles [twinkle 0 0 0] :palette 0}
+     :twinkle2 {:tiles [0 0 0 twinkle] :palette 0}
+     :wall     {:tiles (tileset/block tiles :wall) :palette 1}}))
+
+(def legend {\. :sky, \+ :twinkle, \* :twinkle2, \# :wall})
+
+(def screens
+  {:title
+   (screen/screen
+    {:metatiles metatiles :legend legend
+     :rows ["................"
+            "..+.......*....."
+            ".......+......+."
+            ".*.............."
+            "............*..."
+            "................"
+            "................"
+            "..*..........+.."
+            "................"
+            "................"
+            ".+............*."
+            "................"
+            ".....*....+....."
+            "..+..........*.."
+            "................"]
+     :text [[8 9 "CATCH THE STARS"]
+            [10 18 "PRESS START"]
+            [5 22 "MIND THE SPIKY THING!"]]})
+
+   :playfield
+   (screen/screen
+    {:metatiles metatiles :legend legend
+     :rows ["................"
+            "................"
+            "################"
+            "#..+........*..#"
+            "#..............#"
+            "#.......+......#"
+            "#.*............#"
+            "#............+.#"
+            "#.....*........#"
+            "#..............#"
+            "#..+......*....#"
+            "#..............#"
+            "#.......+....*.#"
+            "#.*............#"
+            "################"]
+     :text [[11 2 "SCORE 000"]]})
+
+   :game-over
+   (screen/screen
+    {:metatiles metatiles :legend legend
+     :rows (into (vec (repeat 14 "................")) ["################"])
+     :text [[11 10 "GAME OVER"]
+            [11 14 "SCORE"]
+            [10 20 "PRESS START"]]})})
 
 ;; ---------------------------------------------------------------------------
 ;; Numbers to tune
@@ -112,11 +211,13 @@
 (def spike-start-speed {:vx 1.0 :vy 0.75})
 (def spike-speed-up [:imm (gen/fixed 0.125)])        ; added per star caught
 
-;; Where things may be: the screen is 256 x 240, pictures are 16 x 16, and
-;; the top rows are kept for the score.
-(def left 8) (def right 232) (def top 32) (def bottom 208)
+;; Where things may be: inside the wall, which is one 16-pixel block thick
+;; (see the :playfield screen below). Pictures are 16 x 16 and placed by
+;; their top left corner.
+(def left 16) (def right 224) (def top 48) (def bottom 208)
 
 (def touching 12)                                    ; pixels, centre to centre
+(def too-close 40)                                   ; a new star is never this near the player
 
 (def score-column 17) (def score-row 2)
 
@@ -127,16 +228,20 @@
   (sub/sub
    :place-star
    "Put the star somewhere random: 128 possible places each way, a power
-  of two, so keeping the low 7 bits of a random byte is all it takes."
-   [(call rt/random) [:and [:imm 0x7F]] [:clc] [:adc [:imm 56]] [:sta :star/x]
-    (call rt/random) [:and [:imm 0x7F]] [:clc] [:adc [:imm 48]] [:sta :star/y]]))
+  of two, so keeping the low 7 bits of a random byte is all it takes. If
+  that's right by the player (a free point), try again."
+   [[:label :another-place]
+    (call rt/random) [:and [:imm 0x7F]] [:clc] [:adc [:imm 56]] [:sta :star/x]
+    (call rt/random) [:and [:imm 0x7F]] [:clc] [:adc [:imm 64]] [:sta :star/y]
+    (gen/when-close [(gen/whole :player/x) (gen/whole :player/y)] [:star/x :star/y] too-close
+      [:jmp :another-place])]))
 
 (defn score-digit
   "Instructions that leave the tile for digit `i` of the score in A."
   [i]
   [[:lda [:+ :score i]]
    [:clc]
-   [:adc [:imm (font/tile-of \0)]]])
+   [:adc [:imm (font/tile-of \0 (tileset/tile tiles :font))]]])
 
 (defn speed-up
   "Make a speed a little bigger, whichever way it's going."
@@ -195,10 +300,7 @@
 
 (def title
   {:enter [(rt/draw-screen
-             (rt/clear-background)
-             (rt/text 8 9 "CATCH THE STARS")
-             (rt/text 10 18 "PRESS START")
-             (rt/text 5 22 "MIND THE SPIKY THING!"))]
+             (rt/background :title))]
    :update [;; some decoration: the cast, standing still
             (rt/metasprite [:imm 88] [:imm 104] face-sprites)
             (rt/metasprite [:imm 120] [:imm 104] star-sprites)
@@ -209,8 +311,7 @@
 
 (def playing
   {:enter [(rt/draw-screen
-             (rt/clear-background)
-             (rt/text 11 score-row "SCORE 000"))
+             (rt/background :playfield))
            (gen/fill :score 3 [:imm 0])
            (gen/move16 :player/x [:imm (gen/fixed 120)])
            (gen/move16 :player/y [:imm (gen/fixed 112)])
@@ -226,13 +327,11 @@
 
 (def game-over
   {:enter [(rt/draw-screen
-             (rt/clear-background)
-             (rt/text 11 10 "GAME OVER")
-             (rt/text 11 14 "SCORE ")
-             ;; the digits come from memory, so they're written one by one
+             (rt/background :game-over)
+             ;; the score comes from memory, so its digits are written here
+             (rt/at score-column 14)
              (for [i (range 3)]
-               [(score-digit i) [:sta :ppudata]])
-             (rt/text 10 20 "PRESS START"))]
+               [(score-digit i) [:sta :ppudata]]))]
    :update [(rt/when-pressed :start
               (transition :playing))]})
 
@@ -242,8 +341,9 @@
   (rt/program
    {:name "catch.nes"
     :variables variables
-    :tiles tiles
+    :tiles (:tiles tiles)
     :palettes palettes
+    :screens screens
     :initial :title
     :states [[:title title]
              [:playing playing]

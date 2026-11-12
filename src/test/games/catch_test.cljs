@@ -54,7 +54,7 @@
     (is (= 12 (sprites-shown m)))
     (testing "the star is somewhere on the screen"
       (is (<= 56 (harness/peek-at m :star/x) 183))
-      (is (<= 48 (harness/peek-at m :star/y) 175)))
+      (is (<= 64 (harness/peek-at m :star/y) 191)))
     (testing "the D-pad moves the face a pixel and a half a frame"
       (harness/hold! m :left :up)
       (harness/frames! m 2)
@@ -78,10 +78,10 @@
 
 (deftest the-spike-bounces
   (let [m (start-playing (game))]
-    ;; keep the player out of its way
     (dotimes [_ 600]
-      (put-fixed! m :player/x 120)
-      (put-fixed! m :player/y 20)
+      ;; keep the player out of its way: in whichever corner is furthest
+      (put-fixed! m :player/x (if (> (whole m :enemy/x) 120) catch/left catch/right))
+      (put-fixed! m :player/y (if (> (whole m :enemy/y) 128) catch/top catch/bottom))
       (harness/poke-at! m :star/x 250)
       (harness/frame! m)
       (is (<= catch/left (whole m :enemy/x) catch/right))
@@ -103,14 +103,14 @@
                  (put-fixed! m :enemy/x 200)          ; the spike, out of the way
                  (put-fixed! m :enemy/y 200)
                  (put-fixed! m :player/x 60)
-                 (put-fixed! m :player/y 60)
+                 (put-fixed! m :player/y 70)
                  (harness/poke-at! m :star/x 64)
-                 (harness/poke-at! m :star/y 58)
+                 (harness/poke-at! m :star/y 68)
                  (harness/frame! m))]
     (harness/poke-at! m :enemy/vx (bit-and (gen/fixed 1.0) 0xFF) 1)
     (let [{:keys [update nmi]} (catch!)]
       (is (= [0 0 1] (score)))
-      (is (not= [64 58] [(harness/peek-at m :star/x) (harness/peek-at m :star/y)]) "a new star")
+      (is (not= [64 68] [(harness/peek-at m :star/x) (harness/peek-at m :star/y)]) "a new star")
       (is (= (gen/fixed 1.125) (speed)) "the spike speeds up")
       (testing "the score on screen was sent to the PPU in the NMI"
         (is (= (font/tile-of \1) (harness/peek-at m 0x2007)) "the last tile written: the ones digit")
@@ -140,6 +140,21 @@
       (is (= :playing (state m)))
       (is (= [0 0 0] (mapv #(harness/peek-at m (+ (get (:symbols m) :score) %)) (range 3))))
       (is (= [120 112] [(whole m :player/x) (whole m :player/y)])))))
+
+(deftest a-new-star-is-never-on-the-player
+  (let [m (start-playing (game))]
+    (dotimes [_ 60]
+      ;; the spike stays parked in a corner (each star speeds it up again)
+      (harness/poke-at! m :enemy/vx 0 0 0 0)
+      (put-fixed! m :enemy/x catch/right)
+      (put-fixed! m :enemy/y catch/bottom)
+      ;; walk onto the star, wherever it is, and see where the next one goes
+      (put-fixed! m :player/x (harness/peek-at m :star/x))
+      (put-fixed! m :player/y (harness/peek-at m :star/y))
+      (harness/frame! m)
+      (is (or (>= (abs (- (harness/peek-at m :star/x) (whole m :player/x))) catch/too-close)
+              (>= (abs (- (harness/peek-at m :star/y) (whole m :player/y))) catch/too-close))))
+    (is (= [0 6 0] (mapv #(harness/peek-at m (+ (get (:symbols m) :score) %)) (range 3))) "sixty stars")))
 
 (deftest different-games-get-different-stars
   (let [first-star (fn [frames-before-start]

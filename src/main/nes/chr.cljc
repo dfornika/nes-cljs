@@ -22,7 +22,8 @@
   for sprites.
 
   See https://www.nesdev.org/wiki/PPU_pattern_tables"
-  (:require [nes.bytes :as bytes]))
+  (:require [gamedev-toolkit.chr :as toolkit-chr]
+            [nes.bytes :as bytes]))
 
 (def tile-bytes 16)
 (def tiles-per-table 256)
@@ -96,6 +97,35 @@
         g (bit-and (bit-shift-right bgr 8) 0xFF)
         b (bit-and (bit-shift-right bgr 16) 0xFF)]
     (> (+ (* 0.299 r) (* 0.587 g) (* 0.114 b)) 140)))
+
+;; ---------------------------------------------------------------------------
+;; Changing tiles
+
+(defn pixel-writes
+  "The bytes to write to give the tile at `addr` in `mem` color `color`
+  (0-3) at pixel `x`, `y`: [[address value] [address value]], one for
+  each bit plane. (A pixel's color number is spread over two bytes: its
+  low bit in the first plane, its high bit in the second.)"
+  [mem addr x y color]
+  (let [bit (- 7 x)
+        with-bit (fn [byte on?]
+                   (if on?
+                     (bit-or byte (bit-shift-left 1 bit))
+                     (bit-and byte (bit-xor 0xFF (bit-shift-left 1 bit)))))]
+    [[(+ addr y) (with-bit (bytes/at mem (+ addr y)) (bit-test color 0))]
+     [(+ addr y 8) (with-bit (bytes/at mem (+ addr y 8)) (bit-test color 1))]]))
+
+(defn tile-text
+  "The tile at `addr` in `mem` as 8 strings of `.` `1` `2` `3`: how
+  gamedev-toolkit.chr draws tiles in a game's source."
+  [mem addr]
+  (toolkit-chr/rows (mapv #(bytes/at mem (+ addr %)) (range tile-bytes))))
+
+(defn text-writes
+  "The bytes to write to make the tile at `addr` look like `rows` (8
+  strings of `.` `1` `2` `3`): [[address value] ...]."
+  [addr rows]
+  (vec (map-indexed (fn [i byte] [(+ addr i) byte]) (toolkit-chr/tile rows))))
 
 ;; ---------------------------------------------------------------------------
 ;; Drawing
