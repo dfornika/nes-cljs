@@ -327,10 +327,6 @@ move to its own repository once its API settles. Games are in
   second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move; ladders
   and one-way platforms (more kinds of block than "solid"); enemies that fall and land
   (`move-body` for objects in a pool)
-- [ ] **Engine follow-ups** – acceleration and friction for the player; variable jump height
-  (let go of A early); objects with more than one byte of position; animation as data
-  (frames and timings in a table) rather than code; the 8-sprites-per-line limit: rotate the
-  order objects are drawn in so they flicker, not vanish
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the
   assembler from the page
 - [ ] **A small language** of expressions and typed variables that compiles to generators
