@@ -155,6 +155,22 @@ try {
     });
   }
 
+  await step('Alienscape draws', async () => {
+    // A room from an art pack (PNG files turned into tiles when the art was
+    // imported): a lot more colors on screen than the hand-drawn games.
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Alienscape")');
+    await page.waitForSelector('.rom-name:has-text("alienscape")');
+    await page.click('button:text-is("Lens")');
+    const state = () => page.locator('tr', {has: page.locator('td:text-is("rt.state")')}).locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
+    await page.keyboard.down('Enter');
+    await until(async () => (await state()).includes('playing'));
+    await page.keyboard.up('Enter');
+    const colors = await until(async () => { const n = await colorsOnScreen(); return n >= 8 && n; });
+    check(true, `Alienscape: the room draws (${colors} colors)`);
+  });
+
   await step('Star Hopper plays', async () => {
     // The platform game: Start begins play, the hopper stands on the floor,
     // and A makes it jump (its own variables say so, in the Lens tab).

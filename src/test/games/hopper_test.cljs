@@ -3,7 +3,7 @@
   nes.cpu.harness): the physics, the objects and the timing."
   (:require [cljs.test :refer [deftest is testing]]
             [games.hopper :as hopper]
-            [gamedev-toolkit.objects :as objects]
+            [games.platform-kit :as kit]
             [gamedev-toolkit.sound :as sound]
             [nes.cpu.harness :as harness]))
 
@@ -55,7 +55,7 @@
     (is (= [[:star 32 64] [:star 208 64] [:star 112 112] [:star 32 144] [:spike 192 144] [:star 112 176] [:spike 208 208]]
            (map (juxt :type :x :y) (things m)))
         "and a star or a spike wherever there's a * or an S")
-    (is (= 5 (harness/peek-at m :stars-left)))
+    (is (= 5 (harness/peek-at m :pickups-left)))
     (is (= [0 0 0] (score m)))))
 
 (deftest standing-and-running
@@ -87,7 +87,7 @@
     (harness/frame! m)
     (is (not (grounded? m)))
     (testing "the jump sound starts"
-      (is (= (sound/registers hopper/jump-sound) (mapv #(harness/peek-at m (+ 0x4000 %)) (range 4)))))
+      (is (= (sound/registers (:jump kit/default-sounds)) (mapv #(harness/peek-at m (+ 0x4000 %)) (range 4)))))
     (harness/hold! m)
     (dotimes [_ 60]
       (harness/frame! m)
@@ -136,18 +136,18 @@
     (put! m 112 176)                                 ; on the star above the low girder
     (let [{:keys [update nmi]} (harness/frame! m)]
       (is (= [0 0 1] (score m)))
-      (is (= 4 (harness/peek-at m :stars-left)))
+      (is (= 4 (harness/peek-at m :pickups-left)))
       (is (= 4 (count (filter #(= :star (:type %)) (things m)))) "its slot is free again")
-      (is (= (sound/registers hopper/star-sound) (mapv #(harness/peek-at m (+ 0x4004 %)) (range 4))))
+      (is (= (sound/registers (:pickup kit/default-sounds)) (mapv #(harness/peek-at m (+ 0x4004 %)) (range 4))))
       (is (< (+ update nmi 513) 29780) "a frame's work fits in a frame")
       (is (< (+ nmi 513) 2270) "and the NMI handler in vertical blank"))
     (testing "the last one brings them all back"
-      (doseq [[_ x y] (filter #(= :star (first %)) hopper/placed)
+      (doseq [[_ x y] (filter #(= :pickup (first %)) (:placed hopper/in-level))
               :when (not= [x y] [112 176])]
         (put! m x y)
         (harness/frame! m))
       (is (= [0 0 5] (score m)))
-      (is (= 5 (harness/peek-at m :stars-left)))
+      (is (= 5 (harness/peek-at m :pickups-left)))
       (is (= 5 (count (filter #(= :star (:type %)) (things m)))))
       (is (= [32 208] (where m)) "and the player is back at the start"))))
 
@@ -172,7 +172,7 @@
     (put! m 200 208)                                 ; beside the spike on the floor
     (harness/frames! m 2)
     (is (= :game-over (state m)))
-    (is (= (sound/registers hopper/hit-sound) (mapv #(harness/peek-at m (+ 0x400C %)) (range 4))))
+    (is (= (sound/registers (:hit kit/default-sounds)) (mapv #(harness/peek-at m (+ 0x400C %)) (range 4))))
     (tap! m :start)
     (is (= :playing (state m)))
     (is (= [32 208] (where m)))))

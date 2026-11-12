@@ -38,6 +38,7 @@
     (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
     (play! (catch/build))    ; a whole game: src/main/games/catch.cljc
     (play! (hopper/build))   ; a platform game: src/main/games/hopper.cljc
+    (play! (alienscape/build))   ; the same rules, with art from a CC0 pack
     (save! (catch/build))    ; ...downloaded as a .nes file
     (save-edn!)              ; the loaded game's program, as EDN text you can read
     (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}      ; draw over the picture, from memory
@@ -53,6 +54,7 @@
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
             [gamedev-toolkit.asm :as asm]
+            [games.alienscape :as alienscape]
             [games.catch :as catch]
             [games.hello :as hello]
             [games.hopper :as hopper]
