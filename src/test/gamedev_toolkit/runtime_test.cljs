@@ -137,6 +137,24 @@
         (is (= [2 1 1] (types r)) "three fit; the fourth is left out")
         (is (= [10 30 50 20 40 60] (mapv #((:peek r) (+ 0x303 %)) (range 6))))))))
 
+(deftest drawing-in-turns
+  (let [pool (objects/pool :thing 3 [:coin] {:x :u8})
+        symbols {:thing/type 0x300 :thing/x 0x303 :rt/slot 0x10 :rt/turn 0x11 :log 0x20 :n 0x30}
+        ;; visit every object, writing its x to a log
+        visit (objects/each-rotating pool
+                [:ldy :n]
+                [:lda :thing/x :x]
+                [:sta :log :y]
+                [:inc :n])
+        order (fn [turn]
+                (let [r (harness/run-routine [visit [:rts]]
+                                             {:symbols symbols
+                                              :memory {0x300 [1 1 1] 0x303 [10 20 30] 0x11 turn}})]
+                  (mapv #((:peek r) (+ 0x20 %)) (range 3))))]
+    (is (= [20 30 10] (order 0)) "it moves on one first, then goes round")
+    (is (= [30 10 20] (order 1)))
+    (is (= [10 20 30] (order 2)) "and wraps")))
+
 (deftest is-it-solid
   ;; a 16 x 16 map with one solid block, at column 3, row 2
   (let [solid (assoc (vec (repeat 256 0)) (+ (* 2 16) 3) 1)

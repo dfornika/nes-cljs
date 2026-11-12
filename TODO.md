@@ -287,6 +287,41 @@ move to its own repository once its API settles. Games are in
   screens), its animated tiles (the liquid, the doors: needs CHR RAM or bank switching), the
   leech; reading what's solid from the art (most solid blocks look alike); an "import a PNG"
   button in the page
+- [x] **Engine, part two** – `games.tower`, Star Tower, and what it needed:
+  - **Kinds of block** – `:kind :solid / :one-way / :ladder` on a metatile; a ladder's top is
+    worked out when the ROM is built (`screen/kind-bytes`) and is both climbable and stood on;
+    `rt/on-kinds` tests what `probe` found
+  - **One-way platforms and ladders** in `gamedev-toolkit.platformer`: `move-body` lands on a
+    one-way platform only from above; `ladders` climbs with Up and Down
+  - **Feel** – `platformer/speed-up` and `slow-down` (acceleration and friction), `cut-jump`
+    (let go of A to cut a jump short)
+  - **Music** – `sound/song` (notes by name, in frames), played on the triangle channel by
+    the runtime (`:songs`, `rt/play-song`, `rt/stop-music`)
+  - **Enemies that fall** – a walker with `:falls? true` walks off edges and drops
+  - **Flicker instead of vanishing** – `objects/each-rotating` draws objects in a different
+    order each frame
+  - `games.platform-kit` takes all of these as options; Star Hopper and Alienscape are unchanged
+- [ ] **Engine, part three** – scrolling (a camera, and drawing new columns as they come into
+  view) and levels wider than a screen, which needs objects with more than one byte of
+  position; a second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move
+  (and carry the player)
+- [ ] **Engine follow-ups** – animation as data (frames and timings in a table) rather than
+  code; a second voice for the music (on a pulse channel, giving way to sound effects);
+  `move-body` for objects in a pool, so enemies can jump; the player climbing onto a ladder
+  from beside it without lining up exactly
+- [x] **Art from a pack** – `resources/assets/hexanys-alienscape` (Hexany's Alienscape, CC0);
+  `gamedev-toolkit.png` (JVM) turns pictures into NES tiles: nearest NES colors, palettes that
+  cover the tiles, one palette per 16x16 area (repainting the few pixels that don't fit),
+  shared tiles, animation frames. `games.alienscape.import` writes the result as data
+  (`games.alienscape.art`), so the game builds anywhere; a JVM test checks it's up to date
+- [x] **One set of rules, two games** – `games.platform-kit`: Star Hopper's rules with the looks,
+  level and numbers passed in. `games.hopper` and `games.alienscape` are each a page of data
+- [x] `rt/animated` (frames that take turns), `screen/from-tiles` (a screen from imported tiles,
+  with what's solid drawn separately), `palette/rgb` and `palette/nearest`
+- [ ] **Art follow-ups** – the pack's other three rooms (needs scrolling or doors between
+  screens), its animated tiles (the liquid, the doors: needs CHR RAM or bank switching), the
+  leech; reading what's solid from the art (most solid blocks look alike); an "import a PNG"
+  button in the page
 - [ ] **Engine, part two** – scrolling (a camera, and drawing new columns as they come into
   view) and levels wider than a screen; music (a note every few frames, from a table); a
   second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move; ladders
