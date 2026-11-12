@@ -348,6 +348,10 @@ a JVM emulator could reuse it one day.
 
 ## Housekeeping
 
+- [ ] **The breakpoint form sometimes empties itself** – in the smoke test, about one run in
+  ten, the address typed into the CPU tab's "Stop on" form is gone before Add is clicked (the
+  test now fills it in again). Find out why: something re-creating the form, or the way
+  Reagent handles typing into inputs
 - [ ] **A name** – "meta-nes" (after the Super NES, and Lisp's metacircular evaluator) is the
   candidate. Renaming moves the site's address, so do it once, perhaps when the toolkit
   becomes its own library and needs a name too

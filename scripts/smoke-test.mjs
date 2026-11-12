@@ -163,9 +163,11 @@ try {
     await page.waitForSelector('.rom-name:has-text("hopper")');
     await page.click('button:text-is("Lens")');
     const row = name => page.locator('tr', {has: page.locator(`td:text-is("${name}")`)});
-    await until(async () => (await row('rt.state').textContent()).includes('title'));
+    // (the state is shown in a dropdown: its value is the one selected)
+    const state = () => row('rt.state').locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
     await page.keyboard.down('Enter');
-    await until(async () => (await row('rt.state').textContent()).includes('playing'));
+    await until(async () => (await state()).includes('playing'));
     await page.keyboard.up('Enter');
     const grounded = () => row('player.on-ground').locator('input').isChecked();
     await until(grounded);
@@ -255,10 +257,11 @@ try {
     await page.waitForSelector('.rom-name:has-text("catch")');
     await until(async () => (await colorsOnScreen()) > 3);
     await page.click('button:text-is("Lens")');
-    const stateRow = page.locator('tr', {has: page.locator('td:text-is("rt.state")')});
-    await until(async () => (await stateRow.textContent()).includes('title'));
+    // (the state is shown in a dropdown: its value is the one selected)
+    const state = () => page.locator('tr', {has: page.locator('td:text-is("rt.state")')}).locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
     await page.keyboard.down('Enter');
-    await until(async () => (await stateRow.textContent()).includes('playing'));
+    await until(async () => (await state()).includes('playing'));
     await page.keyboard.up('Enter');
     check(true, 'Catch the Stars: title screen, then Start begins play');
   });
@@ -305,7 +308,13 @@ try {
     await page.click('button:text-is("CPU")');
     const nmi = (await page.locator('tr:has(td:text-is("NMI")) td').nth(1).textContent()).match(/\$[0-9A-F]{4}/)[0];
     await page.selectOption('form select', 'exec');
-    await page.fill('form input[placeholder="$addr"]', nmi);
+    // Now and then the form comes up empty again after being filled in
+    // (about one run in ten; not yet understood), so fill it until it takes.
+    await until(async () => {
+      await page.fill('form input[placeholder="$addr"]', nmi);
+      await page.waitForTimeout(100);
+      return page.locator('form button:text-is("Add")').isEnabled();
+    });
     await page.click('form button:text-is("Add")');
     await page.waitForSelector('text=Stopped at a breakpoint:');
     const pc = (await page.locator('[title^="Program counter"] div').nth(1).textContent()).trim();
