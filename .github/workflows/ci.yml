@@ -1,6 +1,7 @@
 # Run the tests on every push and pull request.
 #
-# 1. Unit tests (npm test): the pure ClojureScript namespaces, in Node.
+# 1. Unit tests (npm test): the pure ClojureScript namespaces, in Node,
+#    and (npm run test:jvm) the portable ones again on the JVM.
 # 2. A release build of the site (npm run release), which also catches
 #    compiler warnings that only show up with optimizations on.
 # 3. A smoke test (npm run smoke): serves the built site, opens it in
@@ -57,6 +58,11 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      # The same tests again on the JVM, for the code that isn't tied to
+      # the browser (the .cljc files).
+      - name: Unit tests (JVM)
+        run: npm run test:jvm
 
       - name: Release build
         run: npm run release
