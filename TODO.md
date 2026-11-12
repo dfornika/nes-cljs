@@ -51,7 +51,8 @@ committed to; pick whatever looks fun.
 - [x] **Text tables** – .tbl files; `:text` / `:screen-text` lens fields; Screen as text in the
   Background tab (load any .tbl)
 - [ ] **Patch files** – save ROM changes as an IPS patch instead of a whole ROM
-- [ ] **CHR ROM editing** (ROM lenses can only change PRG ROM)
+- [x] **CHR ROM editing** – the Tiles tab's editor and `emu/tile-poke!` (ROM lenses still only
+  change PRG ROM)
 - [ ] **Snapshot history** – keep the last few seconds of per-frame snapshots; ask
   "when did $0075 last change?"
 - [ ] **Restore a snapshot** – needs full state (jsnes `toJSON`), not just memory
@@ -218,8 +219,20 @@ move to its own repository once its API settles. Games are in
   the rest stay as `[:db ...]`: lossless always, more readable the more you play
 - [ ] **Build from the command line** (the toolkit runs on JVM Clojure too): a `clj -X` entry
   that writes the `.nes` and `.edn` files
-- [ ] **CHR tile editor** – paint tiles in the Tiles view and write them back into a ROM
-- [ ] **Assets as data** – palettes, screens and levels as EDN
+- [x] **Tile editor** – Tiles tab: click a tile and paint on it. The game's picture changes as
+  you paint; the change goes into the cartridge's CHR ROM when the tiles can be traced back to
+  it (so it's in the ROM and EDN you download), and the tile is shown as text to paste into a
+  game's source. `(tile n)` and `(tile! n rows)` at the REPL
+- [x] **Assets as data** – `gamedev-toolkit.tileset` (tiles by name instead of number),
+  `gamedev-toolkit.palette` (colors and palettes by name), `gamedev-toolkit.screen` (a
+  background drawn as text: 16 by 15 blocks with a legend, text over the top, packed as runs).
+  The runtime takes `:screens` and draws one with `(background :title)`
+- [ ] **Asset follow-ups** – read drawings and screens from `.edn` files; import a PNG as tiles;
+  a screen editor in the page (paint with blocks, as the tile editor paints with pixels); share
+  identical tiles; better packing for screens with patterns; levels bigger than a screen
+- [ ] **Tile editor follow-ups** – undo; copy and paste tiles; flip and shift; paint with the
+  palette the tile is drawn with on screen; games whose mappers switch 1 KB or 2 KB of tiles
+  at a time (changes there stay in the PPU's memory only)
 - [ ] **Engine pieces** – metatiles, collision with the background, scrolling, sound, object
   slots with spawn and despawn, animation, a second mapper
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the

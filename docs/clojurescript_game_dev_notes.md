@@ -4,8 +4,9 @@ Notes from a conversation about where NES.cljs could go: writing an NES
 game in ClojureScript and building it into a `.nes` ROM that runs here or
 in any other emulator. This is thinking out loud, to come back to.
 
-Built so far (see "Making games" in `TODO.md`): layers 1 to 5 and the
-start of 6 (`gamedev-toolkit.runtime`), with a first game beyond the
+Built so far (see "Making games" in `TODO.md`): layers 1 to 5, the
+start of 6 (`gamedev-toolkit.runtime`), and art as data (tilesets,
+palettes and screens drawn as text), with a first game beyond the
 milestone (`src/main/games/catch.cljc`), as the
 `gamedev-toolkit` library (`src/main/gamedev_toolkit`), and the first
 milestone, `src/main/games/hello.cljc`. Two things came out differently
