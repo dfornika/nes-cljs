@@ -17,6 +17,11 @@
    :ppuscroll 0x2005   ; write twice: X scroll, then Y
    :ppuaddr   0x2006   ; write twice: high byte, then low, of a video memory address
    :ppudata   0x2007   ; read/write video memory there; the address then moves on
+   ;; APU (sound): four registers for each channel (see gamedev-toolkit.sound)
+   :pulse1    0x4000   ; the first square-wave channel
+   :pulse2    0x4004   ; the second
+   :triangle  0x4008
+   :noise     0x400C
    ;; APU and I/O
    :dmc-freq  0x4010   ; sample channel settings (bit 7: its interrupt)
    :oamdma    0x4014   ; write a page number: copy that page to sprite memory

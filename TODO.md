@@ -259,8 +259,30 @@ move to its own repository once its API settles. Games are in
 - [ ] **Ladder follow-ups** – a page that shows a rung's source beside it running; more rungs
   (a background, sound, scrolling); the same for the toolkit's layers (assembler → generators →
   subroutines → runtime)
-- [ ] **Engine pieces** – metatiles, collision with the background, scrolling, sound, object
-  slots with spawn and despawn, animation, a second mapper
+- [x] **Engine, part one: a platform game on one screen** – `games.hopper`, Star Hopper, and
+  what it needed:
+  - **Solid blocks** – `:solid? true` on a metatile; each screen carries a map of them, and
+    `rt/solid-at` / `rt/probe` ask "is the background solid at this pixel?"
+  - **Platformer physics** – `gamedev-toolkit.platformer`: `move-body` (gravity, landing on
+    things, bumping heads, walls) and `jump`, generated for a body's own variables
+  - **Objects** – `gamedev-toolkit.objects`: a pool of slots (a structure of arrays; type 0 is
+    free) with `spawn`, `each`, `by-type`, `remove-it`; a level's objects are drawn in its text
+    with its blocks (`in-drawing`) and spawned from a table (`spawn-all`)
+  - **Sound effects** – `gamedev-toolkit.sound`: an effect is four register writes, and the
+    sound chip's own fade and pitch-bend do the rest
+  - **Facing both ways, and walking** – `tileset/sprites-flipped`; two frames, chosen by the
+    frame count
+  - `gen/indexed` operands (an entry in a table, by X or Y), so the one-byte generators and
+    `metasprite` work on objects in a pool
+- [ ] **Engine, part two** – scrolling (a camera, and drawing new columns as they come into
+  view) and levels wider than a screen; music (a note every few frames, from a table); a
+  second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move; ladders
+  and one-way platforms (more kinds of block than "solid"); enemies that fall and land
+  (`move-body` for objects in a pool)
+- [ ] **Engine follow-ups** – acceleration and friction for the player; variable jump height
+  (let go of A early); objects with more than one byte of position; animation as data
+  (frames and timings in a table) rather than code; the 8-sprites-per-line limit: rotate the
+  order objects are drawn in so they flicker, not vanish
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the
   assembler from the page
 - [ ] **A small language** of expressions and typed variables that compiles to generators
@@ -285,9 +307,9 @@ plan, or it's an afternoon. Otherwise it waits here.
 - [ ] **Calling conventions** – arguments here go in registers or variables, so there's
   nothing for a callee to clean up. It would matter with a software stack for arguments (as
   cc65 has), which costs enough cycles that games avoid it
-- [ ] **A pool of objects** – what games use where other programs use a heap: a fixed number
-  of slots (a structure of arrays) and a free list. Spawn and despawn, no fragmentation. In
-  the engine work
+- [x] **A pool of objects** – what games use where other programs use a heap: a fixed number
+  of slots (a structure of arrays). Spawn and despawn, no fragmentation: `gamedev-toolkit.objects`.
+  (It looks for a free slot each time; a free list would be quicker with many slots)
 - [ ] **A priority queue** – MagerValp's AsmHeap is this (a binary min-heap of bytes in 128
   bytes, push and pop), not a memory allocator. As a generator it could order sprites by
   depth, or schedule "do this in N frames"
@@ -326,6 +348,10 @@ a JVM emulator could reuse it one day.
 
 ## Housekeeping
 
+- [ ] **The breakpoint form sometimes empties itself** – in the smoke test, about one run in
+  ten, the address typed into the CPU tab's "Stop on" form is gone before Add is clicked (the
+  test now fills it in again). Find out why: something re-creating the form, or the way
+  Reagent handles typing into inputs
 - [ ] **A name** – "meta-nes" (after the Super NES, and Lisp's metacircular evaluator) is the
   candidate. Renaming moves the site's address, so do it once, perhaps when the toolkit
   becomes its own library and needs a name too

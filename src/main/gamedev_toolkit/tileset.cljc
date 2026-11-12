@@ -71,3 +71,12 @@
    (let [{:keys [first width height]} (entry tileset name)]
      (vec (for [row (range height), col (range width)]
             [(+ first (* row width) col) (* 8 col) (* 8 row) attributes])))))
+
+(defn sprites-flipped
+  "Like `sprites`, but facing the other way: each tile flipped left to
+  right, and the tiles in the opposite order across."
+  ([tileset name] (sprites-flipped tileset name 0))
+  ([tileset name attributes]
+   (let [{:keys [first width height]} (entry tileset name)]
+     (vec (for [row (range height), col (range width)]
+            [(+ first (* row width) (- width 1 col)) (* 8 col) (* 8 row) (bit-or attributes 0x40)])))))

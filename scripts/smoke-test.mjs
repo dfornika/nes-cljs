@@ -155,6 +155,39 @@ try {
     });
   }
 
+  await step('Star Hopper plays', async () => {
+    // The platform game: Start begins play, the hopper stands on the floor,
+    // and A makes it jump (its own variables say so, in the Lens tab).
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Star Hopper")');
+    await page.waitForSelector('.rom-name:has-text("hopper")');
+    await page.click('button:text-is("Lens")');
+    const row = name => page.locator('tr', {has: page.locator(`td:text-is("${name}")`)});
+    // (the state is shown in a dropdown: its value is the one selected)
+    const state = () => row('rt.state').locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
+    await page.keyboard.down('Enter');
+    await until(async () => (await state()).includes('playing'));
+    await page.keyboard.up('Enter');
+    const grounded = () => row('player.on-ground').locator('input').isChecked();
+    await until(grounded);
+    // A jump lasts about half a second, which a slow machine could miss
+    // between two looks. So keep pressing A, looking straight after each
+    // press, until it's seen in the air.
+    await until(async () => {
+      await page.keyboard.down('KeyX');
+      await page.waitForTimeout(150);
+      const inAir = !(await grounded());
+      await page.keyboard.up('KeyX');
+      return inAir;
+    }, 20000);
+    await until(grounded);
+    check(true, 'Star Hopper: Start begins play; A jumps, and it lands again');
+    await page.click('.overlay-chooser label:has-text("Physics")');
+    const blocks = await until(async () => { const n = await page.locator('.overlay-layer rect').count(); return n > 50 && n; });
+    check(true, `Star Hopper: the Physics overlay shows the solid blocks (${blocks} boxes)`);
+  });
+
   await step('the ladder', async () => {
     // The smallest cartridge loads and runs (doing nothing); the next rung
     // up colors the screen.
@@ -224,10 +257,11 @@ try {
     await page.waitForSelector('.rom-name:has-text("catch")');
     await until(async () => (await colorsOnScreen()) > 3);
     await page.click('button:text-is("Lens")');
-    const stateRow = page.locator('tr', {has: page.locator('td:text-is("rt.state")')});
-    await until(async () => (await stateRow.textContent()).includes('title'));
+    // (the state is shown in a dropdown: its value is the one selected)
+    const state = () => page.locator('tr', {has: page.locator('td:text-is("rt.state")')}).locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
     await page.keyboard.down('Enter');
-    await until(async () => (await stateRow.textContent()).includes('playing'));
+    await until(async () => (await state()).includes('playing'));
     await page.keyboard.up('Enter');
     check(true, 'Catch the Stars: title screen, then Start begins play');
   });
@@ -274,7 +308,13 @@ try {
     await page.click('button:text-is("CPU")');
     const nmi = (await page.locator('tr:has(td:text-is("NMI")) td').nth(1).textContent()).match(/\$[0-9A-F]{4}/)[0];
     await page.selectOption('form select', 'exec');
-    await page.fill('form input[placeholder="$addr"]', nmi);
+    // Now and then the form comes up empty again after being filled in
+    // (about one run in ten; not yet understood), so fill it until it takes.
+    await until(async () => {
+      await page.fill('form input[placeholder="$addr"]', nmi);
+      await page.waitForTimeout(100);
+      return page.locator('form button:text-is("Add")').isEnabled();
+    });
     await page.click('form button:text-is("Add")');
     await page.waitForSelector('text=Stopped at a breakpoint:');
     const pc = (await page.locator('[title^="Program counter"] div').nth(1).textContent()).trim();

@@ -3,6 +3,7 @@
             [gamedev-toolkit.asm :as asm]
             [gamedev-toolkit.font :as font]
             [gamedev-toolkit.gen :as gen]
+            [gamedev-toolkit.objects :as objects]
             [gamedev-toolkit.runtime :as rt]
             [gamedev-toolkit.screen :as screen]
             [gamedev-toolkit.sub :refer [call]]
@@ -96,6 +97,62 @@
         (is (= (+ start length -1) pointer))
         (is (= 0 (harness/peek-at m pointer)))))
     (is (pos? (count packed)))))
+
+(deftest objects-in-a-pool
+  (let [pool (objects/pool :thing 3 [:coin :bat] {:x :u8 :y :u8})
+        symbols {:thing/type 0x300 :thing/x 0x303 :thing/y 0x306 :rt/slot 0x10 :rt/temp 0x11 :total 0x20}
+        run (fn [forms] (harness/run-routine [forms [:rts]] {:symbols symbols}))
+        types (fn [r] (mapv #((:peek r) (+ 0x300 %)) (range 3)))]
+    (testing "spawning takes the first free slot, and sets its fields"
+      (let [r (run [(objects/spawn pool :bat {:x [:imm 40] :y [:imm 50]})
+                    (objects/spawn pool :coin {:x [:imm 60]})])]
+        (is (= [2 1 0] (types r)))
+        (is (= [40 60 50 0] [((:peek r) 0x303) ((:peek r) 0x304) ((:peek r) 0x306) ((:peek r) 0x307)]))))
+    (testing "a full pool: nothing happens, and the carry flag says so"
+      (let [r (run [(repeatedly 4 #(objects/spawn pool :coin {}))])]
+        (is (= [1 1 1] (types r)))
+        (is (:carry? r))))
+    (testing "each visits the ones that exist, and can remove them"
+      (let [r (run [(objects/spawn pool :coin {:x [:imm 5]})
+                    (objects/spawn pool :bat {:x [:imm 7]})
+                    (objects/spawn pool :coin {:x [:imm 9]})
+                    ;; add up the coins' x, removing each; bats get x + 1
+                    (objects/each pool
+                      (objects/by-type pool
+                        {:coin [(gen/add :total (objects/field pool :x))
+                                [:ldx [:imm 99]]             ; the body may wreck X...
+                                (objects/slot)               ; ...and get it back
+                                (objects/remove-it pool)]
+                         :bat [(gen/add (objects/field pool :x) [:imm 1])]}))])]
+        (is (= 14 ((:peek r) 0x20)))
+        (is (= [0 2 0] (types r)))
+        (is (= 8 ((:peek r) 0x304)))))
+    (testing "a level's objects, from a table"
+      (let [r (harness/run-routine [(objects/clear pool)
+                                    (objects/spawn-all pool :table)
+                                    [:rts]
+                                    [:label :table]
+                                    [:db (objects/placements pool [[:bat 10 20] [:coin 30 40] [:coin 50 60] [:bat 70 80]])]]
+                                   {:symbols symbols})]
+        (is (= [2 1 1] (types r)) "three fit; the fourth is left out")
+        (is (= [10 30 50 20 40 60] (mapv #((:peek r) (+ 0x303 %)) (range 6))))))))
+
+(deftest is-it-solid
+  ;; a 16 x 16 map with one solid block, at column 3, row 2
+  (let [solid (assoc (vec (repeat 256 0)) (+ (* 2 16) 3) 1)
+        ask (fn [x y]
+              (let [r (harness/run-routine [[:ldx [:imm x]] [:ldy [:imm y]] (call rt/solid-at) [:rts]
+                                            [:label :map] [:db solid]]
+                                           {:symbols {:rt/map 0x10 :rt/temp 0x12}
+                                            ;; the routine is at $8000: 3 instructions and the RTS before the table
+                                            :memory {0x10 [0x08 0x80]}})]
+                [(:a r) (:x r)]))]
+    (is (= [1 48] (ask 48 32)) "the block's top left pixel; X is left alone")
+    (is (= [1 63] (ask 63 47)) "its bottom right")
+    (is (= 0 (first (ask 47 32))) "one pixel to the left")
+    (is (= 0 (first (ask 64 40))) "one to the right")
+    (is (= 0 (first (ask 50 31))) "one above")
+    (is (= 0 (first (ask 50 48))) "one below")))
 
 (deftest random-numbers
   ;; call `random` 600 times, collecting the bytes
