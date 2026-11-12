@@ -155,6 +155,30 @@ try {
     });
   }
 
+  await step('Star Hopper plays', async () => {
+    // The platform game: Start begins play, the hopper stands on the floor,
+    // and A makes it jump (its own variables say so, in the Lens tab).
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Star Hopper")');
+    await page.waitForSelector('.rom-name:has-text("hopper")');
+    await page.click('button:text-is("Lens")');
+    const row = name => page.locator('tr', {has: page.locator(`td:text-is("${name}")`)});
+    await until(async () => (await row('rt.state').textContent()).includes('title'));
+    await page.keyboard.down('Enter');
+    await until(async () => (await row('rt.state').textContent()).includes('playing'));
+    await page.keyboard.up('Enter');
+    const grounded = () => row('player.on-ground').locator('input').isChecked();
+    await until(grounded);
+    await page.keyboard.down('KeyX');
+    await until(async () => !(await grounded()));
+    await page.keyboard.up('KeyX');
+    await until(grounded);
+    check(true, 'Star Hopper: Start begins play; A jumps, and it lands again');
+    await page.click('.overlay-chooser label:has-text("Physics")');
+    const blocks = await until(async () => { const n = await page.locator('.overlay-layer rect').count(); return n > 50 && n; });
+    check(true, `Star Hopper: the Physics overlay shows the solid blocks (${blocks} boxes)`);
+  });
+
   await step('the ladder', async () => {
     // The smallest cartridge loads and runs (doing nothing); the next rung
     // up colors the screen.

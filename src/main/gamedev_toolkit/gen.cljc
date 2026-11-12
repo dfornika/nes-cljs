@@ -50,13 +50,29 @@
   [o]
   (if (imm? o) [:imm [:hi (second o)]] [:+ o 1]))
 
+(defn indexed
+  "An operand that's one entry of a table: the byte at `addr` plus the X
+  (or Y) register. For the one-byte generators (`move`, `add`,
+  `subtract`, `abs-difference`, `when-close`), and for tables of objects:
+  (move :speed (indexed :enemies/speed :x))"
+  [addr register]
+  {:addr addr :index register})
+
+(defn with-operand
+  "The instruction `mnemonic` on `operand`: an ordinary operand, or one
+  made with `indexed`."
+  [mnemonic operand]
+  (if (map? operand)
+    [mnemonic (:addr operand) (:index operand)]
+    [mnemonic operand]))
+
 ;; ---------------------------------------------------------------------------
 ;; Moving and arithmetic. All of these use A.
 
 (defn move
   "dst = src (one byte)."
   [dst src]
-  [[:lda src] [:sta dst]])
+  [(with-operand :lda src) (with-operand :sta dst)])
 
 (defn move16
   "dst = src (two bytes)."
@@ -68,13 +84,13 @@
   "dst = dst + src (one byte; it wraps around past 255). The carry flag
   is left set if it wrapped."
   [dst src]
-  [[:clc] [:lda dst] [:adc src] [:sta dst]])
+  [[:clc] (with-operand :lda dst) (with-operand :adc src) (with-operand :sta dst)])
 
 (defn subtract
   "dst = dst - src (one byte; it wraps around below 0). The carry flag is
   left CLEAR if it wrapped (on the 6502, carry means 'no borrow')."
   [dst src]
-  [[:sec] [:lda dst] [:sbc src] [:sta dst]])
+  [[:sec] (with-operand :lda dst) (with-operand :sbc src) (with-operand :sta dst)])
 
 (defn add16
   "dst = dst + src (two bytes). ADC adds the carry flag in as well, which
@@ -519,7 +535,7 @@
 (defn abs-difference
   "A = how far apart the bytes `a` and `b` are, whichever is bigger."
   [a b]
-  [[:lda a] [:sec] [:sbc b]
+  [(with-operand :lda a) [:sec] (with-operand :sbc b)
    ;; carry clear means it went below zero: flip it to positive
    (when-flag :no-carry
      [:eor [:imm 0xFF]]

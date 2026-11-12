@@ -32,7 +32,13 @@
   the metatiles with gamedev-toolkit.font, whose first tile is
   `:font-base` in the cartridge (default 0).
 
-  Returns {:tiles [960 tile numbers, row by row] :attributes [64 bytes]}."
+  A metatile can also say what it's like to bump into: {:solid? true}
+  for a wall or a floor. That goes in the screen's :solid map, a byte for
+  each metatile (1 for solid), which gamedev-toolkit.runtime's `solid-at`
+  looks things up in.
+
+  Returns {:tiles [960 tile numbers, row by row] :attributes [64 bytes]
+  :solid [240 bytes, a row of 16 at a time]}."
   [{:keys [metatiles legend text font-base] drawn :rows :or {font-base 0}}]
   (when-not (and (= rows (count drawn)) (every? #(= columns (count %)) drawn))
     (throw (ex-info (str "A screen is " rows " rows of " columns " characters; this has "
@@ -69,7 +75,9 @@
                                   (bit-shift-left (palette-at (inc c) r) 2)
                                   (bit-shift-left (palette-at c (inc r)) 4)
                                   (bit-shift-left (palette-at (inc c) (inc r)) 6))))]
-    {:tiles tiles :attributes attributes}))
+    {:tiles tiles
+     :attributes attributes
+     :solid (vec (for [row grid, m row] (if (:solid? m) 1 0)))}))
 
 (defn nametable
   "A screen as the 1024 bytes of video memory it fills: tiles, then

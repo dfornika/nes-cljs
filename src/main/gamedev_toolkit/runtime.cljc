@@ -57,7 +57,12 @@
     (transition :playing)     ask for a transition to another state
     (call random)             a random byte in A
     (sprite ...) (metasprite ...) (queue ...) (draw-screen ...)
-    (background :title)       inside draw-screen: a whole screen from :screens"
+    (background :title)       inside draw-screen: a whole screen from :screens
+    (probe x dx y dy)         is the background solid there? (see `solid-at`)
+
+  More of an engine is built on this: gamedev-toolkit.objects (a pool of
+  things that come and go), gamedev-toolkit.platformer (gravity, jumping,
+  standing on things) and gamedev-toolkit.sound (sound effects)."
   (:require [gamedev-toolkit.asm :as asm]
             [gamedev-toolkit.chr :as chr]
             [gamedev-toolkit.font :as font]
@@ -142,19 +147,23 @@
   to 3), plus 0x40 to flip it left-right and 0x80 upside down.
 
   The loop over the pieces runs when the ROM is built: the NES gets the
-  instructions for each piece written out. Uses A and X."
-  [x y pieces]
-  [[:ldx :rt/oam-next]
-   (for [[i [tile dx dy attributes]] (map-indexed vector pieces)
-         :let [at (fn [field] [:+ :oam (+ (* 4 i) field)])]]
-     [[:lda y] (when-not (zero? dy) [[:clc] [:adc [:imm dy]]]) [:sta (at 0) :x]
-      [:lda [:imm tile]]                                       [:sta (at 1) :x]
-      [:lda [:imm (or attributes 0)]]                          [:sta (at 2) :x]
-      [:lda x] (when-not (zero? dx) [[:clc] [:adc [:imm dx]]]) [:sta (at 3) :x]])
-   [:txa]
-   [:clc]
-   [:adc [:imm (* 4 (count pieces))]]
-   [:sta :rt/oam-next]])
+  instructions for each piece written out. Uses A and X; or with
+  {:with :y}, A and Y, leaving X alone, for when `x` and `y` are entries
+  in a table of objects that X is the index into (see gen/indexed)."
+  ([x y pieces] (metasprite x y pieces {}))
+  ([x y pieces {:keys [with] :or {with :x}}]
+   (let [[load transfer] (case with :x [:ldx :txa] :y [:ldy :tya])]
+     [[load :rt/oam-next]
+      (for [[i [tile dx dy attributes]] (map-indexed vector pieces)
+            :let [at (fn [field] [:+ :oam (+ (* 4 i) field)])]]
+        [(gen/with-operand :lda y) (when-not (zero? dy) [[:clc] [:adc [:imm dy]]]) [:sta (at 0) with]
+         [:lda [:imm tile]]                                                        [:sta (at 1) with]
+         [:lda [:imm (or attributes 0)]]                                           [:sta (at 2) with]
+         (gen/with-operand :lda x) (when-not (zero? dx) [[:clc] [:adc [:imm dx]]]) [:sta (at 3) with]])
+      [transfer]
+      [:clc]
+      [:adc [:imm (* 4 (count pieces))]]
+      [:sta :rt/oam-next]])))
 
 (defn sprite
   "Draw one 8x8 sprite: (sprite {:x :ball/x :y :ball/y :tile 5})."
@@ -272,7 +281,45 @@
   [name]
   [(set-video-address (:nametable-0 hw/video))
    (gen/move16 :rt/pointer [:imm (keyword "screen" (clojure.core/name name))])
-   (call unpack-to-video)])
+   (call unpack-to-video)
+   ;; and from now on, this is the screen `solid-at` asks about
+   (gen/move16 :rt/map [:imm (keyword "solid" (clojure.core/name name))])])
+
+;; ---------------------------------------------------------------------------
+;; Bumping into the background
+;;
+;; Each screen comes with a map of which of its 16x16 blocks are solid (see
+;; gamedev-toolkit.screen): 16 bytes a row, 15 rows. Finding the byte for
+;; a pixel takes no multiplying: the block's row is y / 16 and there are 16
+;; to a row, so the row's first byte is at (y / 16) * 16, which is just y
+;; with its low four bits cleared. Add the column, x / 16, and that's it.
+
+(def solid-at
+  (sub/sub
+   :solid-at
+   "Is the background solid at a pixel? Give x in X and y in Y. Afterwards
+  A is the map's byte for the block there, and the zero flag is set if
+  it's empty: (gen/when-flag :not-zero ...) runs for something solid.
+  Changes A and Y; X is left alone."
+   [[:tya]
+    [:and [:imm 0xF0]]                  ; (y / 16) * 16
+    [:sta :rt/temp]
+    [:txa]
+    [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a]   ; x / 16
+    [:ora :rt/temp]
+    [:tay]
+    [:lda [:ind :rt/map] :y]]))
+
+(defn probe
+  "Ask `solid-at` about the pixel `dx` right and `dy` down from the point
+  x, y (`src` operands, one byte each). The flags answer, as for
+  `solid-at`. Uses A, X and Y."
+  [x dx y dy]
+  ;; y first: if x and y are entries in a table indexed by X (see
+  ;; gen/indexed), both have to be read before X is used for the pixel
+  [(gen/with-operand :lda y) [:clc] [:adc [:imm dy]] [:tay]
+   (gen/with-operand :lda x) [:clc] [:adc [:imm dx]] [:tax]
+   (call solid-at)])
 
 (defn draw-screen
   "Run `body` with the picture and the NMI turned off, so it can write as
@@ -334,7 +381,11 @@
          :oam-next  :u8
          :queue-end :u8
          :seed      :u16
-         :pointer   :u16}]               ; for reading tables in the ROM
+         :pointer   :u16                 ; for reading tables in the ROM
+         :map       :u16                 ; the current screen's map of what's solid
+         :temp      :u8                  ; scratch, for the runtime's own routines
+         :slot      :u8                  ; the object being looked at (see gamedev-toolkit.objects)
+         :old       :u16}]               ; a position to go back to (see gamedev-toolkit.platformer)
    [:pad {:held     [:bits hw/button-bits]
           :pressed  [:bits hw/button-bits]
           :previous [:bits hw/button-bits]}]
@@ -356,6 +407,7 @@
    [:stx :ppuctrl]                      ; NMI off
    [:stx :ppumask]                      ; picture off
    [:stx :dmc-freq]                     ; sample interrupts off
+   [:lda [:imm 0x0F]] [:sta :snd-chn]   ; the four sound channels on
 
    ;; The PPU needs about two frames to warm up. Meanwhile, clear all
    ;; 2 KB of RAM (it holds garbage at power on) and hide the sprites.
@@ -478,12 +530,13 @@
                 (see gamedev-toolkit.palette)
     :screens    {name screen}: backgrounds (see gamedev-toolkit.screen), drawn
                 with (background name) inside draw-screen
+    :tables     {label bytes}: other data to put in the ROM, each under its label
     :overlays   [{:name :doc :draw (fn [variables] shapes)} ...]: things for a
                 debugger to draw over the picture, from the game's variables
                 (NES.cljs: see nes.overlay). Passed through as they are
 
   Returns what rom/nrom returns, with :name."
-  [{:keys [name states initial variables tiles palettes screens overlays]}]
+  [{:keys [name states initial variables tiles palettes screens tables overlays]}]
   (let [states (vec states)
         state-names (mapv first states)
         _ (when-not (some #{initial} state-names)
@@ -505,7 +558,13 @@
                     [:db palettes]
                     (for [[screen-name s] screens]
                       [[:label (keyword "screen" (clojure.core/name screen-name))]
-                       [:db (screen/pack (screen/nametable s))]])]
+                       [:db (screen/pack (screen/nametable s))]
+                       ;; what's solid: 240 bytes, and a row below the screen
+                       ;; that's all solid, so nothing falls out of the bottom
+                       [:label (keyword "solid" (clojure.core/name screen-name))]
+                       [:db (:solid s) (repeat 16 1)]])
+                    (for [[label bytes] tables]
+                      [[:label label] [:db bytes]])]
              :vectors {:nmi :nmi :reset :reset :irq :irq}
              :symbols (merge hw/registers
                              (into {} (map-indexed (fn [i n] [(keyword "state" (clojure.core/name n)) i])

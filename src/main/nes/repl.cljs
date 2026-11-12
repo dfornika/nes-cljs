@@ -37,6 +37,7 @@
     (play! (ladder/build :nil))   ; the smallest cartridge; then :color :pulse :pad :sprite
     (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
     (play! (catch/build))    ; a whole game: src/main/games/catch.cljc
+    (play! (hopper/build))   ; a platform game: src/main/games/hopper.cljc
     (save! (catch/build))    ; ...downloaded as a .nes file
     (save-edn!)              ; the loaded game's program, as EDN text you can read
     (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}      ; draw over the picture, from memory
@@ -54,6 +55,7 @@
             [gamedev-toolkit.asm :as asm]
             [games.catch :as catch]
             [games.hello :as hello]
+            [games.hopper :as hopper]
             [games.ladder :as ladder]
             [nes.console :as console]
             [nes.breakpoints :as bp]
