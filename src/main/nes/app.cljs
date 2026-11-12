@@ -23,13 +23,19 @@
             [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db dev-tools]]
             [nes.tiles-view :refer [tiles-view]]
+            [games.catch :as catch]
             [games.hello :as hello]
             [nes.touchpad :as touchpad]
             [nes.ui :as ui]
             [nes.workbench :as workbench]))
 
 (def sample-roms
-  [{:name "Hello"
+  [{:name "Catch the Stars"
+    :build catch/build
+    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/catch.cljc"
+    :blurb "A small game: catch stars, dodge the spiky thing, which speeds up as you score. Start to play, D-pad to move."
+    :credit "written in ClojureScript, for NES.cljs"}
+   {:name "Hello"
     ;; no file: built in the page, from ClojureScript data, when clicked
     :build hello/build
     :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/hello.cljc"
@@ -230,6 +236,21 @@
           " of the ROM (from the Lens tab or the REPL), in the running game. The changes last until you load another ROM. "
           [:a {:href "#" :on-click (fn [e] (.preventDefault e) (console/download-rom!))}
            "Download the changed ROM"]])
+       ;; the cartridge as text: see gamedev-toolkit.rom-edn
+       (let [link (fn [label title f]
+                    [:a {:href "#" :title title :on-click (fn [e] (.preventDefault e) (f))} label])
+             built (workbench/built-game (:sha1 (:rom @db)))]
+         [:div {:style {:margin-top "6px" :font-size "13px"}}
+          "Save as EDN (text): "
+          (when built
+            [:<> [link "the program" "Every instruction and tile drawing, as the assembler was given them. Only for games built here."
+                  #(workbench/save-edn! (:rom @db) :source)]
+             " · "])
+          [link "the bytes" "The cartridge's parts, as hexadecimal text. Works for any ROM."
+           #(workbench/save-edn! (:rom @db) :container)]
+          (when built
+            [:<> " · " [link "or as a .nes file" "The ROM file, to play in any emulator"
+                        #(workbench/save-nes! built)]])])
        [:table {:style {:margin-top "8px" :border-spacing "0 6px"}}
         [:tbody
          [row "PRG ROM" (str (kib prg-size) " (" prg-banks " × 16 KB)")

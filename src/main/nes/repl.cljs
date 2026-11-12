@@ -35,6 +35,9 @@
     (lens-source \"Player\")   ; print it as code to paste into a file
 
     (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
+    (play! (catch/build))    ; a whole game: src/main/games/catch.cljc
+    (save! (catch/build))    ; ...downloaded as a .nes file
+    (save-edn!)              ; the loaded game's program, as EDN text you can read
     (syms)                   ; a game built here has names: its labels and variables
     (rd :player/x)           ; ...which work wherever an address does
     (break! :write :color) (dis :main)
@@ -44,6 +47,7 @@
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
             [gamedev-toolkit.asm :as asm]
+            [games.catch :as catch]
             [games.hello :as hello]
             [nes.console :as console]
             [nes.breakpoints :as bp]
@@ -420,3 +424,17 @@
   addresses (see `syms`). Returns the ROM's size in bytes."
   [built]
   (workbench/play! built))
+
+(defn save!
+  "Download a built game as a .nes file, to play in any emulator:
+  (save! (catch/build))"
+  [built]
+  (workbench/save-nes! built))
+
+(defn save-edn!
+  "Download the loaded cartridge as EDN text (see gamedev-toolkit.rom-edn).
+  With no argument: the program, as instructions and tile drawings, if the
+  game was built here, otherwise the bytes as hex. Or ask for one:
+  (save-edn! :source) or (save-edn! :container)."
+  ([] (or (save-edn! :source) (save-edn! :container)))
+  ([kind] (workbench/save-edn! (:rom @db) kind)))

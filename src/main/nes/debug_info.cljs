@@ -32,7 +32,9 @@
   "The variables in `memory` (from gamedev-toolkit.memory/allocate) as a
   lens: [[name spec] ...], in the order they were declared (see nes.lens).
   A structure of arrays becomes one array per field, named like
-  :enemies.x."
+  :enemies.x. So does a struct that wouldn't fit on one line of the Lens
+  tab: one with more than four fields, or with a field of named bits (a
+  row of checkboxes each), like :pad.held."
   [memory]
   (vec
    (mapcat
@@ -41,7 +43,16 @@
         (case kind
           :scalar [[name (lens-spec type addr)]]
           :array (let [[_ n elem] type] [[name [:array addr n elem]]])
-          :struct [[name [:struct addr (vec (apply concat (second type)))]]]
+          :struct (if (or (> (count (second type)) 4)
+                          (some #(and (vector? (second %)) (= :bits (first (second %)))) (second type)))
+                    ;; one field each, at the addresses the struct gives them
+                    (first (reduce (fn [[out at] [k t]]
+                                     [(conj out [(keyword (str (clojure.core/name name) "." (clojure.core/name k)))
+                                                 (lens-spec t at)])
+                                      (+ at (if (#{:u16 :u8.8 :s8.8} t) 2 1))])
+                                   [[] addr]
+                                   (second type)))
+                    [[name [:struct addr (vec (apply concat (second type)))]]])
           :soa (let [[_ n fields] type]
                  (map-indexed (fn [i [k t]]
                                 [(keyword (str (clojure.core/name name) "." (clojure.core/name k)))

@@ -83,3 +83,94 @@
         :cycles cycles
         :peek #(aget mem %)
         :labels labels}))))
+
+;; ---------------------------------------------------------------------------
+;; A whole program, without a console
+;;
+;; A game built with gamedev-toolkit can run here too, as long as something
+;; stands in for the hardware it talks to. This does the least that works:
+;; the PPU always says it's in vertical blank, writes to hardware registers
+;; just land in memory (so a test can look at the last one), there's a
+;; controller, and the test says when a frame ends.
+;;
+;; It relies on two labels that both games.hello and programs made by
+;; gamedev-toolkit.runtime have: :main (the top of the main loop) and
+;; :wait-for-frame (where the main loop waits for the NMI).
+
+(def ^:private button-bits
+  ;; in the order the controller reports them
+  [:a :b :select :start :up :down :left :right])
+
+(defn console
+  "`built` (what a game's `build` returns) loaded and ready to `boot!`.
+  Returns a machine (see `machine`) with the game's :labels and :symbols."
+  [{:keys [prg labels symbols]}]
+  (let [org (- 0x10000 (count prg))
+        {:keys [^js mem ^js bus] :as m} (machine prg org)
+        held (atom #{})      ; the buttons down now
+        reading (atom 0)     ; which button the next read of $4016 gives
+        read (.-read bus)
+        write (.-write bus)]
+    (aset mem 0x2002 0x80)   ; PPUSTATUS: always 'in vertical blank'
+    (set! (.-read bus)
+          (fn [addr]
+            (if (= addr 0x4016)
+              (let [button (get button-bits @reading)]
+                (swap! reading inc)
+                (if (contains? @held button) 1 0))
+              (read addr))))
+    (set! (.-write bus)
+          (fn [addr value]
+            ;; writing 1 makes the controller start again from A
+            (when (and (= addr 0x4016) (odd? value)) (reset! reading 0))
+            (write addr value)))
+    (assoc m :held held :labels labels :symbols symbols)))
+
+(defn boot!
+  "Run from RESET to the top of the main loop. Returns the machine."
+  [{:keys [s bus labels] :as m}]
+  (cpu/jump-to-reset-vector! s bus)
+  (run-until! m (:main labels) 1000000)
+  m)
+
+(defn hold!
+  "Hold down exactly these buttons (keywords like :start, :left) from now on."
+  [m & buttons]
+  (reset! (:held m) (set buttons))
+  m)
+
+(defn frame!
+  "Run one frame: the main loop until it waits, the NMI handler, and on
+  to the top of the main loop. Returns the CPU cycles each took,
+  {:update n :nmi n}, so a test can check they fit: a frame is 29,780
+  cycles, and the NMI handler should finish within the 2,270 of vertical
+  blank (less the 513 that copying the sprites takes on a real NES, which
+  isn't counted here)."
+  [{:keys [s bus labels] :as m}]
+  (let [waiting (:wait-for-frame labels)
+        update (run-until! m waiting 1000000)
+        nmi (+ (cpu/nmi! s bus) (run-until! m waiting))]
+    (run-until! m (:main labels))
+    {:update update :nmi nmi}))
+
+(defn frames!
+  "Run `n` frames. Returns the machine."
+  [m n]
+  (dotimes [_ n] (frame! m))
+  m)
+
+(defn peek-at
+  "The byte at `addr` (a number, or one of the game's names) in the machine."
+  [{:keys [^js mem labels symbols]} addr]
+  (aget mem (if (keyword? addr)
+              (or (get symbols addr) (get labels addr)
+                  (throw (ex-info (str "The game has nothing called " addr) {})))
+              addr)))
+
+(defn poke-at!
+  "Store `values` from `addr` (a number or a name) on."
+  [{:keys [^js mem symbols] :as m} addr & values]
+  (let [addr (if (keyword? addr) (get symbols addr) addr)]
+    (doseq [[i v] (map-indexed vector values)]
+      (aset mem (+ addr i) v))
+    m))

@@ -64,7 +64,8 @@
 
   Returns {:rom the .nes file's bytes, :prg just the program,
   :labels, :listing (from the assembler), :symbols, :memory,
-  :subroutines [{:name :doc} ...]}."
+  :subroutines [{:name :doc} ...], and :source: everything the assembler
+  was given ({:org :symbols :code}), for gamedev-toolkit.rom-edn}."
   [{:keys [code vectors symbols memory chr prg-size mirroring]
     :or {prg-size prg-bank-size symbols {} mirroring :horizontal}}]
   (when-not (#{16384 32768} prg-size)
@@ -76,15 +77,18 @@
     (throw (ex-info (str clash " is both a variable and one of the :symbols") {:name clash})))
   (let [symbols (merge symbols (:symbols memory))
         {:keys [code subroutines]} (sub/link code)
-        {:keys [bytes labels listing]}
-        (asm/assemble [code
-                       [:org 0xFFFA]
-                       [:dw (:nmi vectors) (:reset vectors) (:irq vectors)]]
-                      {:org (- 0x10000 prg-size) :symbols symbols})]
+        org (- 0x10000 prg-size)
+        code (asm/flatten-forms [code
+                                 [:org 0xFFFA]
+                                 [:dw (:nmi vectors) (:reset vectors) (:irq vectors)]])
+        {:keys [bytes labels listing]} (asm/assemble code {:org org :symbols symbols})]
     {:rom (ines {:prg bytes :chr chr :mapper 0 :mirroring mirroring})
      :prg bytes
      :labels labels
      :listing listing
      :symbols symbols
      :memory memory
-     :subroutines subroutines}))
+     :subroutines subroutines
+     :source {:org org :symbols symbols :code code
+              :cartridge {:mapper 0 :mirroring mirroring}
+              :chr chr}}))
