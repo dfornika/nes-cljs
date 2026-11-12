@@ -5,14 +5,15 @@
   appears somewhere else. A spiky ball bounces around the screen, a little
   faster after every star; touch that and the game is over.
 
-  The whole game is three states (title, playing, game over), each with
-  code that runs once when it starts and code that runs every frame. The
+  The whole game is a state machine with three states (title, playing,
+  game over), each with an entry action and code that runs every frame,
+  and transitions between them. The
   runtime does the rest: reading the controller, sending sprites to the
   PPU, and so on. At the REPL: (play! (catch/build))."
   (:require [gamedev-toolkit.chr :as chr]
             [gamedev-toolkit.font :as font]
             [gamedev-toolkit.gen :as gen]
-            [gamedev-toolkit.runtime :as rt :refer [go]]
+            [gamedev-toolkit.runtime :as rt :refer [transition]]
             [gamedev-toolkit.sub :as sub :refer [call]]))
 
 ;; ---------------------------------------------------------------------------
@@ -180,7 +181,7 @@
       (speed-up :enemy/vy))
     (gen/when-close [(gen/whole :player/x) (gen/whole :player/y)]
                     [(gen/whole :enemy/x) (gen/whole :enemy/y)] touching
-      (go :game-over))]))
+      (transition :game-over))]))
 
 (def draw-everything
   (sub/sub
@@ -204,7 +205,7 @@
             (rt/metasprite [:imm 152] [:imm 104] spike-sprites)
             (rt/when-pressed :start
               (rt/stir-random)
-              (go :playing))]})
+              (transition :playing))]})
 
 (def playing
   {:enter [(rt/draw-screen
@@ -233,7 +234,7 @@
                [(score-digit i) [:sta :ppudata]])
              (rt/text 10 20 "PRESS START"))]
    :update [(rt/when-pressed :start
-              (go :playing))]})
+              (transition :playing))]})
 
 (defn build
   "Build the cartridge. Returns {:rom the .nes file's bytes, :name, ...}."
@@ -243,7 +244,7 @@
     :variables variables
     :tiles tiles
     :palettes palettes
-    :start :title
+    :initial :title
     :states [[:title title]
              [:playing playing]
              [:game-over game-over]]}))

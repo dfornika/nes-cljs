@@ -197,8 +197,9 @@ move to its own repository once its API settles. Games are in
 - [ ] **Simple optimizations** – e.g. drop a `LDA x` straight after `STA x`
 - [ ] **Cycle counts without running** – for straight-line code, from the opcode table (for
   now, `nes.cpu.harness/run-routine` runs the code and reports the cycles it took)
-- [x] **Runtime** – `gamedev-toolkit.runtime/program`: a game is its states (`:enter` and
-  `:update` code each) and the runtime is the rest: reset, the NMI handler, the controller
+- [x] **Runtime** – `gamedev-toolkit.runtime/program`: a game is a finite state machine (states
+  with `:enter`, `:update` and `:exit` actions; `transition` between them) and the runtime is
+  the rest: reset, the NMI handler, the controller
   (`when-held`, `when-pressed`), sprites (`sprite`, `metasprite`, hidden when not drawn), a queue
   of background writes (`queue`), whole screens (`draw-screen`, `text`), `random`
 - [x] **A font** – `gamedev-toolkit.font`: A-Z, 0-9 and some punctuation, as tiles

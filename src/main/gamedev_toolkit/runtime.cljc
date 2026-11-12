@@ -2,18 +2,25 @@
   "The part of an NES game that's the same in every game, so a game only
   has to say what's different about it.
 
-  A game is described as a set of *states* (title screen, playing, game
-  over...), each with code to run when it starts (:enter) and code to run
-  every frame while it lasts (:update):
+  A game is described as a *finite state machine*: a set of states (title
+  screen, playing, game over...), of which it's in exactly one at a time,
+  and transitions between them. Each state has actions, which are code:
+
+    :enter   the entry action: run once, on arriving in the state
+    :update  run every frame while in the state
+    :exit    the exit action: run once, on leaving it
+
+  (all optional), and the code asks for a transition with
+  (transition :playing).
 
     (program
      {:name \"mygame.nes\"
       :variables [[:score :u8] ...]          ; as for gamedev-toolkit.memory
       :tiles     [...]                       ; the graphics
       :palettes  [...]                       ; 32 colors
-      :start     :title
+      :initial   :title                      ; the initial state
       :states    [[:title   {:enter [...] :update [...]}]
-                  [:playing {:enter [...] :update [...]}]]})
+                  [:playing {:enter [...] :update [...] :exit [...]}]]})
 
   `program` wraps that in everything else an NES program needs and
   returns a built cartridge (as gamedev-toolkit.rom/nrom does).
@@ -23,8 +30,9 @@
     main loop                          NMI (at every vertical blank)
     ---------                          ---
     read the controller                if the main loop finished its frame:
-    if the state changed, run :enter     copy the sprites to the PPU
-    run the state's :update              write queued changes to the background
+    if a transition was asked for,       copy the sprites to the PPU
+      run :exit, then the new :enter     write queued changes to the background
+    run the state's :update
     hide the sprites not drawn         set scroll, turn the picture on
     say 'frame finished', and wait     count the frame
 
@@ -45,7 +53,8 @@
     :pad/held :pad/pressed    the controller: buttons down now, and ones
                               that went down this frame (see `when-held`)
     :rt/frame                 counts frames
-    (go :playing)             change state
+    :rt/state :rt/next        the current state, and the one asked for
+    (transition :playing)     ask for a transition to another state
     (call random)             a random byte in A
     (sprite ...) (metasprite ...) (queue ...) (draw-screen ...)"
   (:require [gamedev-toolkit.asm :as asm]
@@ -105,9 +114,11 @@
 ;; ---------------------------------------------------------------------------
 ;; States
 
-(defn go
-  "Change to another state: its :enter code runs at the start of the next
-  frame, and its :update from then on."
+(defn transition
+  "Ask for a transition to another state. It happens at the start of the
+  next frame: the current state's :exit action runs, then the new state's
+  :enter action, and its :update from then on. (Until then the rest of
+  this frame's :update carries on as usual.)"
   [state]
   [[:lda [:imm (keyword "state" (name state))]]
    [:sta :rt/next]])
@@ -303,7 +314,7 @@
   (gen/do-while :positive
     [:bit :ppustatus]))
 
-(defn- reset-code [start]
+(defn- reset-code [initial]
   [[:label :reset]
    [:sei]                               ; no interrupts while setting up
    [:cld]                               ; decimal mode off (the NES has none)
@@ -331,8 +342,10 @@
      [:cpx [:imm 32]])
 
    (gen/move :rt/mask [:imm 0x1E])      ; show background and sprites
-   (gen/move :rt/state [:imm 0xFF])     ; no state yet, so the first one is 'entered'
-   (gen/move :rt/next [:imm (keyword "state" (name start))])
+   ;; In no state yet, with a transition to the initial state waiting: so
+   ;; the first frame begins by running its entry action.
+   (gen/move :rt/state [:imm 0xFF])
+   (gen/move :rt/next [:imm (keyword "state" (name initial))])
    (gen/move16 :rt/seed [:imm 0xC0DE])
 
    [:lda [:imm 0x80]]
@@ -352,14 +365,16 @@
           [:jmp done])])
      [:label done]]))
 
-(defn- main-loop [enters updates]
+(defn- main-loop [exits enters updates]
   [[:label :main]
    (call read-pad)
 
+   ;; a transition was asked for: leave one state, arrive in the other
    [:lda :rt/next]
    [:cmp :rt/state]
    (gen/when-flag :not-equal
-     [:sta :rt/state]
+     (when exits (dispatch exits))
+     (gen/move :rt/state :rt/next)
      (dispatch enters))
 
    (gen/move :rt/oam-next [:imm 0])
@@ -421,28 +436,30 @@
   "Build a game (see the namespace docstring) into a cartridge.
 
     :name       the ROM's file name
-    :states     [[name {:enter forms :update forms}] ...]; :enter and
-                :update are both optional
-    :start      the state to begin in
+    :states     [[name {:enter forms :update forms :exit forms}] ...];
+                all three actions are optional
+    :initial    the initial state
     :variables  the game's variables, as for memory/allocate
     :tiles      the graphics, as 16-byte tiles (see gamedev-toolkit.chr),
                 from tile 0. To use `text`, put gamedev-toolkit.font/tiles first
     :palettes   32 colors: four background palettes, then four for sprites
 
   Returns what rom/nrom returns, with :name."
-  [{:keys [name states start variables tiles palettes]}]
+  [{:keys [name states initial variables tiles palettes]}]
   (let [states (vec states)
         state-names (mapv first states)
-        _ (when-not (some #{start} state-names)
-            (throw (ex-info (str ":start is " (pr-str start) ", which isn't one of the states " state-names) {})))
+        _ (when-not (some #{initial} state-names)
+            (throw (ex-info (str ":initial is " (pr-str initial) ", which isn't one of the states " state-names) {})))
         _ (when-not (= 32 (count palettes))
             (throw (ex-info (str ":palettes needs 32 colors, not " (count palettes)) {})))
         state-sub (fn [phase [state-name state]]
                     (sub/sub (keyword (str (clojure.core/name state-name) "-" (clojure.core/name phase)))
                              (get state phase [])))]
     (assoc (rom/nrom
-            {:code [(reset-code start)
-                    (main-loop (map #(state-sub :enter %) states)
+            {:code [(reset-code initial)
+                    (main-loop (when (some #(:exit (second %)) states)   ; most games have none
+                                 (map #(state-sub :exit %) states))
+                               (map #(state-sub :enter %) states)
                                (map #(state-sub :update %) states))
                     nmi
                     irq

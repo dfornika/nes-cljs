@@ -24,14 +24,14 @@
 (deftest pieces
   (is (= 0x2051 (rt/tile-address 17 2)))
   (is (= [[10 0 0 1] [11 8 0 1] [12 0 8 1] [13 8 8 1]] (rt/picture 10 2 2 1)))
-  (is (= [[:lda [:imm :state/playing]] [:sta :rt/next]] (rt/go :playing)))
+  (is (= [[:lda [:imm :state/playing]] [:sta :rt/next]] (rt/transition :playing)))
   (testing "text loads A once for a run of the same letter"
     (is (= [[:lda [:imm 1]] [:sta :ppudata] [:lda [:imm 12]] [:sta :ppudata] [:sta :ppudata]]
            (asm/flatten-forms (drop 1 (rt/text 0 0 "ALL")))))))
 
 (defn- tiny [states]
-  (rt/program {:name "tiny.nes" :start (ffirst states) :states states
-               :variables [[:count :u8] [:entered :u8]]
+  (rt/program {:name "tiny.nes" :initial (ffirst states) :states states
+               :variables [[:count :u8] [:entered :u8] [:exited :u8]]
                :tiles font/tiles
                :palettes (repeat 32 0x0F)}))
 
@@ -40,9 +40,10 @@
            (harness/console
             (tiny [[:one {:enter [[:inc :entered]]
                           :update [[:inc :count]
-                                   (rt/when-pressed :a (rt/go :two))]}]
+                                   (rt/when-pressed :a (rt/transition :two))]}]
                    [:two {:update [[:dec :count]
-                                   (rt/when-held :b (rt/go :one))]}]])))
+                                   (rt/when-held :b (rt/transition :one))]
+                          :exit [[:inc :exited]]}]])))
         at #(harness/peek-at m %)]
     (harness/frames! m 3)
     (is (= [3 1 0] [(at :count) (at :entered) (at :rt/state)]) "enter once, update every frame")
@@ -53,7 +54,8 @@
     (is (= [2 1] [(at :count) (at :rt/state)]))
     (harness/hold! m :b)
     (harness/frames! m 2)
-    (is (= [0 2] [(at :rt/state) (at :entered)]) "back in the first state, entered again")))
+    (is (= [0 2] [(at :rt/state) (at :entered)]) "back in the first state, entered again")
+    (is (= 1 (at :exited)) "and the second state's exit action ran, once")))
 
 (deftest sprites-and-queue
   (let [m (harness/boot!
@@ -91,6 +93,6 @@
 
 (deftest mistakes
   (is (thrown-with-msg? js/Error #"isn't one of the states"
-                        (rt/program {:start :nope :states [[:a {}]] :tiles [] :palettes (repeat 32 0)})))
+                        (rt/program {:initial :nope :states [[:a {}]] :tiles [] :palettes (repeat 32 0)})))
   (is (thrown-with-msg? js/Error #"needs 32 colors"
-                        (rt/program {:start :a :states [[:a {}]] :tiles [] :palettes [1 2 3]}))))
+                        (rt/program {:initial :a :states [[:a {}]] :tiles [] :palettes [1 2 3]}))))
