@@ -14,4 +14,9 @@
                               ;; data browser for tap> (dev builds only)
                               djblue/portal {:mvn/version "0.65.0"}}}
            :test {:extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
-                  :extra-paths ["src/test"]}}}
+                  :extra-paths ["src/test"]}
+           ;; The .cljc tests again, on the JVM (npm run test:jvm): the code
+           ;; that isn't tied to the browser has to work in both places.
+           :test-jvm {:extra-deps {io.github.cognitect-labs/test-runner
+                                   {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+                      :main-opts ["-m" "cognitect.test-runner" "-d" "src/test"]}}}

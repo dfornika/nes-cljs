@@ -231,13 +231,17 @@ move to its own repository once its API settles. Games are in
 Non-UI code is written as `.cljc` from here on (the toolkit and games already are), so that
 a JVM emulator could reuse it one day.
 
-- [ ] **Portability, stage one** – a small shared namespace for hex formatting and number
-  parsing, a byte-array wrapper (JVM bytes are signed), and the easy namespaces moved to
-  `.cljc`: `emulator` (protocols), `debug-info`, `memory-map`, `registers`, `disasm`,
-  `cpu.reference`, `lens` and the lenses, `text-table`, `breakpoints`, `nametable`, `snapshot`,
-  `sprites`; then `rom`, `chr`, `code-log`, `routines`. Their tests run on the JVM in CI
+- [x] **Portability, stage one** – `nes.util` (hex, reading numbers) and `nes.bytes` (byte and
+  32-bit arrays that read the same in the browser and on the JVM, where bytes are signed); 21
+  namespaces moved to `.cljc`: `emulator` (the protocols), `debug-info`, `memory-map`, `gamepad`,
+  `registers`, `disasm`, `cpu.reference`, `lens` and the lenses, `text-table`, `breakpoints`,
+  `nametable`, `snapshot`, `sprites`, `rom`, `chr`, `code-log`, `routines`, `sha1`. Their tests
+  are `.cljc` too and run on the JVM as well (`npm run test:jvm`, and in CI)
+- [ ] **More tests on the JVM** – the assembler's and games' tests run code on `nes.cpu.core`,
+  so they wait for the portable CPU core
 - [ ] **A portable CPU core** – `nes.cpu.core` keeps its registers in a JS object for speed;
   a `deftype` with mutable fields and a bus protocol would work on both. nestest guards it
+- [ ] **`nes.zip`** – unzipping uses the browser's `DecompressionStream`; the JVM has `java.util.zip`
 - [ ] **Split `nes.console`** into a portable controller (run, step, breakpoints) and the
   browser's driver (animation frames, audio, Reagent state)
 - [ ] **Views: what to show, separately from how** – so another front end (HumbleUI?) can
