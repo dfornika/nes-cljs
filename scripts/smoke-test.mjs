@@ -155,6 +155,44 @@ try {
     });
   }
 
+  await step('the ladder', async () => {
+    // The smallest cartridge loads and runs (doing nothing); the next rung
+    // up colors the screen.
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("nil")');
+    await page.waitForSelector('.rom-name:has-text("nil")');
+    await page.click('button:text-is("CPU")');
+    const f0 = await frame();
+    await until(async () => (await frame()) > f0 + 10);
+    check(true, 'the ladder: nil runs');
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("color")');
+    await page.waitForSelector('.rom-name:has-text("color")');
+    const blue = await until(() => page.evaluate(() => {
+      const c = document.querySelector('canvas');
+      const d = c.getContext('2d').getImageData(128, 120, 1, 1).data;
+      return d[2] > 150 && d[2] > d[0] && [d[0], d[1], d[2]].join(',');
+    }));
+    check(true, `the ladder: color turns the screen blue (rgb ${blue})`);
+  });
+
+  await step('overlays', async () => {
+    // Shapes drawn over the picture from the game's own variables.
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Catch the Stars")');
+    await page.waitForSelector('.rom-name:has-text("catch")');
+    await page.keyboard.down('Enter');
+    await page.waitForTimeout(150);
+    await page.keyboard.up('Enter');
+    await page.click('.overlay-chooser label:has-text("Touching")');
+    await page.waitForSelector('.overlay-layer text:text-is("player")');
+    const boxes = await page.locator('.overlay-layer rect').count();
+    check(boxes >= 4, `overlays: the game's touch boxes are drawn (${boxes} boxes)`);
+    await page.click('.overlay-chooser label:has-text("Sprites")');
+    const more = await until(async () => { const n = await page.locator('.overlay-layer rect').count(); return n >= boxes + 12 && n; });
+    check(true, `overlays: and a box for each sprite (${more} boxes)`);
+  });
+
   await step('painting a tile', async () => {
     // In the Tiles tab, paint the top left pixel of the Hello ROM's face
     // tile: the tile's text changes, and the cartridge is marked changed.

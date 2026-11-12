@@ -71,6 +71,32 @@
       ;; doesn't print the whole ROM.
       assoc ::rom-file (emu/rom-file e)))))
 
+(defn- reading
+  "Something that acts like a vector of bytes for `nth`, but reads each
+  one from the emulator when asked."
+  [f]
+  #?(:clj (reify clojure.lang.Indexed
+            (nth [_ i] (f i))
+            (nth [_ i _] (f i))
+            (count [_] 0))
+     :cljs (reify IIndexed
+             (-nth [_ i] (f i))
+             (-nth [_ i _] (f i)))))
+
+(defn live
+  "A view of emulator `e` that lenses can read like a snapshot, without
+  copying its memory first: each byte is read when a lens asks for it. For
+  things that look at a few values every frame (overlays), where `capture`
+  would copy 14 KB to read six bytes. It isn't a value: it changes as the
+  game runs. Sprite memory and the PPU's settings are copied (they're small)."
+  [e]
+  (vary-meta
+   {:ram (reading #(emu/cpu-peek e %))
+    :cart-ram (reading #(emu/cpu-peek e (+ 0x6000 %)))
+    :ppu {:oam (bytes/->vec (emu/oam e))
+          :flags (emu/ppu-flags e)}}
+   assoc ::rom-file (emu/rom-file e)))
+
 ;; ---------------------------------------------------------------------------
 ;; Reading values out of a snapshot by address
 

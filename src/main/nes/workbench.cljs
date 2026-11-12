@@ -6,6 +6,7 @@
             [nes.emulator :as emu]
             [nes.debug-info :as debug-info]
             [nes.lens :as lens]
+            [nes.overlay :as overlay]
             [nes.rom :as rom]))
 
 ;; What `build` returned for the games played here, by ROM hash, so their
@@ -15,7 +16,7 @@
 (defn install!
   "Register what's known about a game built with gamedev-toolkit (what its
   `build` returns), under its ROM's hash: a lens of its variables (shown
-  in the Lens tab) and its symbol table (names in the disassembly, at the
+  in the Lens tab), its overlays (see nes.overlay), and its symbol table (names in the disassembly, at the
   REPL and for breakpoints). Returns the ROM as a Uint8Array."
   [built]
   (let [bytes (js/Uint8Array.from (clj->js (:rom built)))
@@ -23,6 +24,9 @@
         fields (debug-info/lens-fields (:memory built))]
     (debug-info/register! sha1 (debug-info/symbol-table built))
     (when (:source built) (swap! built-games assoc sha1 built))
+    ;; the game's own overlays read its variables
+    (doseq [o (:overlays built)]
+      (overlay/register! (merge {:fields fields} o {:rom sha1})))
     (when (seq fields)
       (lens/register! {:rom sha1
                        :name "Variables"

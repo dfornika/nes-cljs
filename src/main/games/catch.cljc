@@ -335,6 +335,37 @@
    :update [(rt/when-pressed :start
               (transition :playing))]})
 
+;; ---------------------------------------------------------------------------
+;; Overlays
+;;
+;; This part isn't in the game: it runs in the debugger, on your computer,
+;; and draws what the game is thinking over what it's showing. It's given
+;; the game's variables by name (the same values the Lens tab shows).
+
+(defn- touch-box
+  "The square that decides touching, for a thing whose top left is x, y.
+  The game calls two things touching when their top left corners are less
+  than `touching` apart both ways, which is the same as these squares,
+  `touching` wide and centred on each picture, overlapping."
+  [x y color label]
+  (let [inset (/ (- 16 touching) 2)]
+    ;; (+ 1: the PPU draws a sprite one line below the Y it's given)
+    [:rect {:x (+ x inset) :y (+ y inset 1) :w touching :h touching :color color :label label}]))
+
+(def overlays
+  [{:name "Touching"
+    :doc "The squares the game compares to decide what's touching, the spike's speed, and where things may go."
+    :draw (fn [{:keys [player enemy star] state :rt.state}]
+            (when (= state :playing)
+              (let [{ex :x ey :y :keys [vx vy]} enemy]
+                [[:rect {:x left :y top :w (- (+ right 16) left) :h (- (+ bottom 16) top) :color :gray}]
+                 (touch-box (:x player) (:y player) :lime "player")
+                 (touch-box (:x star) (:y star) :yellow "star")
+                 (touch-box ex ey :red "spike")
+                 ;; where the spike will be in a quarter of a second
+                 [:line {:x1 (+ ex 8) :y1 (+ ey 9) :x2 (+ ex 8 (* 15 vx)) :y2 (+ ey 9 (* 15 vy))
+                         :color :red :arrow? true}]])))}])
+
 (defn build
   "Build the cartridge. Returns {:rom the .nes file's bytes, :name, ...}."
   []
@@ -344,6 +375,7 @@
     :tiles (:tiles tiles)
     :palettes palettes
     :screens screens
+    :overlays overlays
     :initial :title
     :states [[:title title]
              [:playing playing]

@@ -34,10 +34,13 @@
     (lens! \"Player\" {:lives [:u8 0x075A]})  ; try out a lens; it shows in the Lens tab
     (lens-source \"Player\")   ; print it as code to paste into a file
 
+    (play! (ladder/build :nil))   ; the smallest cartridge; then :color :pulse :pad :sprite
     (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
     (play! (catch/build))    ; a whole game: src/main/games/catch.cljc
     (save! (catch/build))    ; ...downloaded as a .nes file
     (save-edn!)              ; the loaded game's program, as EDN text you can read
+    (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}      ; draw over the picture, from memory
+              (fn [{:keys [x y]}] [[:rect {:x x :y y :w 16 :h 16}]]))
     (tile 0x2A)              ; a tile, as text: [\"..1111..\" ...]
     (tile! 0x2A [\"..1111..\" ...])   ; ...and drawn from text (or paint in the Tiles tab)
     (syms)                   ; a game built here has names: its labels and variables
@@ -51,6 +54,7 @@
             [gamedev-toolkit.asm :as asm]
             [games.catch :as catch]
             [games.hello :as hello]
+            [games.ladder :as ladder]
             [nes.console :as console]
             [nes.breakpoints :as bp]
             [nes.chr :as chr]
@@ -59,6 +63,7 @@
             [nes.debug-info :as debug-info]
             [nes.emulator :as emu]
             [nes.lens :as lens]
+            [nes.overlay :as overlay]
             ;; game-specific lenses register themselves when loaded
             [nes.lenses.croom]
             [nes.lenses.megaman2]
@@ -462,3 +467,41 @@
   ([table n rows]
    (emulator)
    (console/poke-tiles! (chr/text-writes (chr/tile-address table n) rows))))
+
+;; ---------------------------------------------------------------------------
+;; Overlays
+
+(defn overlays
+  "The overlays the loaded game has, and which are on."
+  []
+  (let [on (:overlays @db)]
+    (mapv (fn [{:keys [name doc]}] {:name name :on? (contains? on name) :doc doc})
+          (overlay/overlays-for (:rom @db)))))
+
+(defn overlay!
+  "Draw over the game's picture. `fields` is a lens (see nes.lens) and
+  `draw` a function from its values to shapes (see nes.overlay):
+
+    (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}
+              (fn [{:keys [x y]}] [[:rect {:x x :y y :w 16 :h 16 :color :red}]]))
+
+  It's registered for the loaded game and turned on. Call it again with
+  the same name to change it; (overlay-off! name) hides it."
+  [name fields draw]
+  (let [rom (or (:rom @db) (throw (ex-info "No ROM loaded yet." {})))]
+    (overlay/register! {:rom (or (:sha1 rom) (:name rom)) :name name :fields fields :draw draw})
+    (swap! db update :overlays (fnil conj #{}) name)
+    (console/refresh-inspectors!)
+    name))
+
+(defn overlay-on!
+  "Show the overlay called `name` (see `overlays`)."
+  [name]
+  (swap! db update :overlays (fnil conj #{}) name)
+  (console/refresh-inspectors!)
+  name)
+
+(defn overlay-off!
+  "Hide the overlay called `name`, or with no argument, all of them."
+  ([] (swap! db assoc :overlays #{}) nil)
+  ([name] (swap! db update :overlays disj name) nil))

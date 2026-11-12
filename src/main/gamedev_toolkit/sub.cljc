@@ -21,6 +21,15 @@
   written straight into the program with `inline`: faster (no JSR and RTS,
   12 cycles) but bigger if it's used in several places.
 
+  Tail calls: when the last thing a subroutine does is call another, the
+  linker makes that a JMP instead of a JSR followed by an RTS. The other
+  subroutine's own RTS then returns straight to the original caller. It's
+  a byte smaller, 9 cycles quicker, and uses no stack for the call, which
+  means a chain of subroutines each ending by calling the next can be as
+  long as you like. (This is 'tail-call elimination', and it's what lets
+  a jump be used as a function call that never comes back: see Guy
+  Steele's paper 'Lambda: The Ultimate GOTO'.)
+
   Calling convention: there isn't one, beyond what the 6502 gives you.
   Arguments and results go in the registers A, X and Y, or in variables.
   gamedev-toolkit.analysis/clobbers says which registers a call changes."
@@ -34,6 +43,8 @@
   ([name doc body]
    (when-not (and (keyword? name) (nil? (namespace name)))
      (throw (ex-info (str "A subroutine's name is a plain keyword, not " (pr-str name)) {:name name})))
+   (when (#{:a :x :y} name)
+     (throw (ex-info (str (pr-str name) " means a register, so it can't be a subroutine's name") {:name name})))
    (cond-> {:name name :body body}
      doc (assoc :doc doc))))
 
@@ -85,20 +96,30 @@
 
 (def ^:private never-falls-through #{:rts :rti :jmp})
 
+(defn- tail-call
+  "A subroutine's code with a final JSR (if that's how it ends) as a JMP."
+  [code]
+  (let [[op target :as last-form] (peek code)]
+    (if (and (= op :jsr) (= 2 (count last-form)))
+      (conj (pop code) [:jmp target])
+      code)))
+
 (defn link
   "Make `forms` ready for the assembler: calls become JSRs, and the code
   of every subroutine reached is put after `forms`, each under a label
-  with its name.
+  with its name. A subroutine that ends by calling another jumps to it
+  instead (see 'Tail calls' above); {:tail-calls? false} turns that off.
 
   Returns {:code the program, :subroutines [{:name :doc} ...]}."
-  [forms]
-  (let [subs (reachable forms)]
-    {:code [(lower forms)
-            (for [{:keys [name body]} subs
-                  :let [code (lower body)]]
-              [[:label name]
-               code
-               ;; no RTS after code that can't reach it anyway
-               (when-not (never-falls-through (first (peek code)))
-                 [:rts])])]
-     :subroutines (mapv #(select-keys % [:name :doc]) subs)}))
+  ([forms] (link forms {}))
+  ([forms {:keys [tail-calls?] :or {tail-calls? true}}]
+   (let [subs (reachable forms)]
+     {:code [(lower forms)
+             (for [{:keys [name body]} subs
+                   :let [code (cond-> (lower body) tail-calls? tail-call)]]
+               [[:label name]
+                code
+                ;; no RTS after code that can't reach it anyway
+                (when-not (never-falls-through (first (peek code)))
+                  [:rts])])]
+      :subroutines (mapv #(select-keys % [:name :doc]) subs)})))

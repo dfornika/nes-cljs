@@ -14,10 +14,10 @@
 (deftest linking
   (let [{:keys [code subroutines]} (sub/link [(call bump-twice) (call bump) [:rts]])]
     (is (= [[:jsr :bump-twice] [:jsr :bump] [:rts]
-            [:label :bump-twice] [:jsr :bump] [:jsr :bump] [:rts]
+            [:label :bump-twice] [:jsr :bump] [:jmp :bump]
             [:label :bump] [:inc 0x20] [:rts]]
            (asm/flatten-forms code))
-        "each subroutine once, after the program, with an RTS; the unused one isn't there")
+        "each subroutine once, after the program; the unused one isn't there; a final call is a jump")
     (is (= [{:name :bump-twice} {:name :bump :doc "Adds 1 to $20."}] subroutines)))
   (testing "no RTS is added after code that can't reach it"
     (is (= [[:jsr :spin] [:label :spin] [:jmp :spin]]
@@ -28,7 +28,30 @@
 (deftest running
   (let [r (harness/run-routine [(call bump-twice) (call bump) [:rts]])]
     (is (= 3 ((:peek r) 0x20)))
-    (is (= {:bump-twice 0x8007 :bump 0x800E} (:labels r)))))
+    (is (= {:bump-twice 0x8007 :bump 0x800D} (:labels r)))))
+
+(deftest tail-calls
+  (testing "turned off, a final call is a JSR and an RTS"
+    (is (= [[:jsr :bump-twice] [:label :bump-twice] [:jsr :bump] [:jsr :bump] [:rts] [:label :bump] [:inc 0x20] [:rts]]
+           (asm/flatten-forms (:code (sub/link [(call bump-twice)] {:tail-calls? false}))))))
+  (testing "a call that isn't last stays a call"
+    (let [then-more (sub/sub :then-more [(call bump) [:inc 0x21]])]
+      (is (= [[:jsr :bump] [:inc 0x21] [:rts]]
+             (take 3 (drop 2 (asm/flatten-forms (:code (sub/link [(call then-more)])))))))))
+  (testing "a chain of tail calls uses no more stack than one call"
+    ;; one -> two -> three -> four, each ending by calling the next; the
+    ;; last records the stack pointer
+    (let [four (sub/sub :four [[:tsx] [:stx 0x30]])
+          three (sub/sub :three [[:inc 0x20] (call four)])
+          two (sub/sub :two [[:inc 0x20] (call three)])
+          one (sub/sub :one [[:inc 0x20] (call two)])
+          depth (fn [opts]
+                  (let [r (harness/run-routine (:code (sub/link [(call one) [:rts]] opts)))]
+                    (is (= 3 ((:peek r) 0x20)))
+                    ;; the harness starts with the stack pointer at $FD
+                    (- 0xFD ((:peek r) 0x30))))]
+      (is (= 2 (depth {})) "just the one return address")
+      (is (= 8 (depth {:tail-calls? false})) "four of them"))))
 
 (deftest inline
   (is (= [[:inc 0x20]] (sub/inline bump)))
@@ -40,6 +63,7 @@
   (is (thrown-with-msg? js/Error #"Two different subroutines are both called :bump"
                         (sub/link [(call bump) (call (sub/sub :bump [[:nop]]))])))
   (is (thrown-with-msg? js/Error #"call takes a subroutine" (call :bump)))
+  (is (thrown-with-msg? js/Error #"means a register" (sub/sub :x [[:nop]])))
   (is (thrown-with-msg? js/Error #"has to be linked" (asm/assemble [(call bump)]))))
 
 (deftest in-a-cartridge

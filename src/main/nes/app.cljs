@@ -11,6 +11,7 @@
             [nes.cpu-view :refer [cpu-view]]
             [nes.instructions-view :refer [instructions-view]]
             [nes.drawer :refer [drawer]]
+            [nes.overlay-view :as overlay-view]
             [nes.splitter :as splitter :refer [splitter]]
             [nes.input :as input]
             [nes.sound :as sound]
@@ -25,6 +26,7 @@
             [nes.tiles-view :refer [tiles-view]]
             [games.catch :as catch]
             [games.hello :as hello]
+            [games.ladder :as ladder]
             [nes.touchpad :as touchpad]
             [nes.ui :as ui]
             [nes.workbench :as workbench]))
@@ -130,6 +132,7 @@
                           (when-let [f (aget (.. e -dataTransfer -files) 0)]
                             (console/load-file! f)))}
          [screen/canvas {:fill? true}]
+         [overlay-view/layer]
          (when (contains? #{nil :empty} status)
            [:div {:style {:position "absolute" :inset 0
                           :display "flex" :align-items "center" :justify-content "center"
@@ -298,7 +301,22 @@
        name]
       [:div {:style {:font-size "13px" :margin-top "3px"}} blurb]
       [:small {:style {:color "#57606a"}}
-       credit " · " [:a {:href about :target "_blank"} "about & source"]]])])
+       credit " · " [:a {:href about :target "_blank"} "about & source"]]])
+   ;; the ladder: tiny programs, each a rung above the last
+   [:div {:style {:border-top "1px solid #d0d7de" :padding-top "10px"}}
+    [:div {:style {:font-weight "bold" :margin-bottom "2px"}} "The ladder"]
+    [:div {:style {:font-size "13px" :margin-bottom "6px"}}
+     "From a cartridge that does nothing, up to something you can steer: each adds one idea. "
+     "Small enough to step through in the CPU tab. "
+     [:a {:href "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/ladder.cljc" :target "_blank"} "source"]]
+    [:div {:style {:display "flex" :gap "6px" :flex-wrap "wrap"}}
+     (for [{:keys [id about]} ladder/rungs]
+       ^{:key id}
+       [:button {:title about
+                 :on-click (fn []
+                             (hide-popover! "samples-menu")
+                             (workbench/play! (ladder/build id)))}
+        (name id)])]]])
 
 (def ^:private tabs
   [{:id :schematic :label "Schematic" :view schematic-view}
@@ -402,7 +420,8 @@
         [break-notice]
         [:div {:class "console-buttons"}
          [controls]
-         [sound-and-speed]]
+         [sound-and-speed]
+         [overlay-view/chooser]]
         (when error
           [c/callout {:kind :error} error])]
        (if theater?
