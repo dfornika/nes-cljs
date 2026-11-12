@@ -82,27 +82,31 @@
      ;; --- up and down
      (gen/move16 :rt/old y)
      (gen/add16 y vy)
-     (gen/move on-ground [:imm 0])
+     ;; (:on-ground is written once, when the answer is known, so that
+     ;; anything looking at it part-way through a frame, like a debugger's
+     ;; overlay, never sees a wrong value)
      [:lda (gen/hi vy)]
      (gen/if-flag :negative
        ;; rising: has its head hit something?
-       [(either-solid wx (inc left) wy top (dec right) top)
+       [(gen/move on-ground [:imm 0])
+        (either-solid wx (inc left) wy top (dec right) top)
         (gen/when-flag :not-zero
           (gen/move16 y :rt/old)
           stop-vy)]
        ;; falling (or still): are its feet in something?
        [(either-solid wx (inc left) wy height (dec right) height)
-        (gen/when-flag :not-zero
+        (gen/if-flag :zero
+          (gen/move on-ground [:imm 0])
           ;; Stand on top of the block. Blocks are 16 high, so the top of
           ;; the one its feet are in is its feet's y with the low four
           ;; bits cleared.
-          [:lda wy] [:clc] [:adc [:imm height]]
-          [:and [:imm 0xF0]]
-          [:sec] [:sbc [:imm height]]
-          [:sta wy]
-          (gen/move (gen/lo y) [:imm 0])
-          (gen/move16 vy [:imm 0])
-          (gen/move on-ground [:imm 1]))])]))
+          [[:lda wy] [:clc] [:adc [:imm height]]
+           [:and [:imm 0xF0]]
+           [:sec] [:sbc [:imm height]]
+           [:sta wy]
+           (gen/move (gen/lo y) [:imm 0])
+           (gen/move16 vy [:imm 0])
+           (gen/move on-ground [:imm 1])])])]))
 
 (defn jump
   "Start a jump, if the body is on the ground: set its upward speed to

@@ -27,6 +27,32 @@
 (def columns 16)
 (def rows 15)
 
+(defn- write-text
+  "`tiles` (960 of them) with each [col row words] of `text` written over."
+  [tiles text font-base]
+  (reduce (fn [tiles [col row words]]
+            (when-not (and (<= 0 col) (<= (+ col (count words)) 32) (< -1 row 30))
+              (throw (ex-info (str (pr-str words) " doesn't fit at column " col ", row " row) {})))
+            (reduce (fn [tiles [i tile]] (assoc tiles (+ (* 32 row) col i) tile))
+                    tiles
+                    (map-indexed vector (font/encode words font-base))))
+          (vec tiles)
+          text))
+
+(defn- attributes
+  "The 64 attribute bytes, given (palette-at col row) for each 16x16
+  block. One byte per 32x32 area: two bits for each of its four blocks,
+  top-left in the lowest bits. (The last row of areas hangs off the bottom
+  of the screen, half unused.)"
+  [palette-at]
+  (let [at (fn [col row] (if (and (< col columns) (< row rows)) (palette-at col row) 0))]
+    (vec (for [ay (range 8), ax (range 8)
+               :let [c (* 2 ax), r (* 2 ay)]]
+           (bit-or (at c r)
+                   (bit-shift-left (at (inc c) r) 2)
+                   (bit-shift-left (at c (inc r)) 4)
+                   (bit-shift-left (at (inc c) (inc r)) 6))))))
+
 (defn screen
   "Build a screen (see the namespace docstring). `:text` is written over
   the metatiles with gamedev-toolkit.font, whose first tile is
@@ -57,27 +83,37 @@
                              (concat (mapcat #(subvec (vec (:tiles %)) 0 2) row)
                                      (mapcat #(subvec (vec (:tiles %)) 2 4) row)))
                            grid))
-        tiles (reduce (fn [tiles [col row words]]
-                        (when-not (and (<= 0 col) (<= (+ col (count words)) 32) (< -1 row 30))
-                          (throw (ex-info (str (pr-str words) " doesn't fit at column " col ", row " row) {})))
-                        (reduce (fn [tiles [i tile]] (assoc tiles (+ (* 32 row) col i) tile))
-                                tiles
-                                (map-indexed vector (font/encode words font-base))))
-                      tiles
-                      text)
-        palette-at (fn [col row] (get-in grid [row col :palette] 0))
-        ;; One byte per 32x32 area: two bits for each of its four metatiles,
-        ;; top-left in the lowest bits. (The last row of areas hangs off
-        ;; the bottom of the screen, half unused.)
-        attributes (vec (for [ay (range 8), ax (range 8)
-                              :let [c (* 2 ax), r (* 2 ay)]]
-                          (bit-or (palette-at c r)
-                                  (bit-shift-left (palette-at (inc c) r) 2)
-                                  (bit-shift-left (palette-at c (inc r)) 4)
-                                  (bit-shift-left (palette-at (inc c) (inc r)) 6))))]
+        tiles (write-text tiles text font-base)]
     {:tiles tiles
-     :attributes attributes
+     :attributes (attributes (fn [col row] (get-in grid [row col :palette] 0)))
      :solid (vec (for [row grid, m row] (if (:solid? m) 1 0)))}))
+
+(defn from-tiles
+  "A screen from art that's already tiles (a picture turned into tiles by
+  gamedev-toolkit.png, say), rather than drawn with metatiles:
+
+    :grid            960 tile numbers, row by row
+    :tile-base       where those tiles start in the cartridge (default 0)
+    :block-palettes  240 palette numbers, one per 16x16 block
+    :solid           what's solid, drawn as for `screen`: 15 rows of 16
+                     characters, where a character in `:solid-characters`
+                     (default just #) is a solid block
+    :text            as for `screen`; the blocks it covers get palette
+                     `:text-palette` (default 0)"
+  [{:keys [grid tile-base block-palettes solid solid-characters text text-palette font-base]
+    :or {tile-base 0 solid-characters #{\#} text-palette 0 font-base 0}}]
+  (when-not (and (= 960 (count grid)) (= 240 (count block-palettes)))
+    (throw (ex-info "A screen is 960 tiles and 240 block palettes" {})))
+  (when-not (and (= rows (count solid)) (every? #(= columns (count %)) solid))
+    (throw (ex-info (str ":solid is " rows " rows of " columns " characters") {:solid solid})))
+  (let [lettered (set (for [[col row words] text, i (range (count words))]
+                        [(quot (+ col i) 2) (quot row 2)]))]
+    {:tiles (write-text (mapv #(+ tile-base %) grid) text font-base)
+     :attributes (attributes (fn [col row]
+                               (if (lettered [col row])
+                                 text-palette
+                                 (nth block-palettes (+ (* 16 row) col) 0))))
+     :solid (vec (for [line solid, ch line] (if (solid-characters ch) 1 0)))}))
 
 (defn nametable
   "A screen as the 1024 bytes of video memory it fills: tiles, then

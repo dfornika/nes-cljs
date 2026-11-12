@@ -24,6 +24,7 @@
             [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db dev-tools]]
             [nes.tiles-view :refer [tiles-view]]
+            [games.alienscape :as alienscape]
             [games.catch :as catch]
             [games.hello :as hello]
             [games.hopper :as hopper]
@@ -33,7 +34,12 @@
             [nes.workbench :as workbench]))
 
 (def sample-roms
-  [{:name "Star Hopper"
+  [{:name "Alienscape"
+    :build alienscape/build
+    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/alienscape.cljc"
+    :blurb "Star Hopper's rules in a room from Hexany's Alienscape: collect the orbs, mind the biters. Start to play, Left and Right to run, A to jump (high)."
+    :credit "art by Hexany Ives (CC0); written in ClojureScript, for NES.cljs"}
+   {:name "Star Hopper"
     :build hopper/build
     :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/hopper.cljc"
     :blurb "A platform game on one screen: run and jump round the girders for the stars, and keep clear of the spikes. Start to play, Left and Right to run, A to jump."

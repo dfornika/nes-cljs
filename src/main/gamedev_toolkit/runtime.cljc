@@ -165,6 +165,30 @@
       [:adc [:imm (* 4 (count pieces))]]
       [:sta :rt/oam-next]])))
 
+(defn animated
+  "Draw one of several pictures, taking turns: `frames` is a vector of
+  1, 2 or 4 sets of pieces (as for `metasprite`), each shown for `:every`
+  frames (a power of two; default 8) before the next. They all change in
+  step, with the frame count. Other options are `metasprite`'s."
+  ([x y frames] (animated x y frames {}))
+  ([x y frames {:keys [every] :or {every 8} :as options}]
+   (let [n (count frames)
+         shifts {1 0, 2 1, 4 2, 8 3, 16 4, 32 5, 64 6}
+         done (asm/genlabel "drawn")]
+     (when-not (and (#{1 2 4} n) (shifts every))
+       (throw (ex-info "animated takes 1, 2 or 4 frames, and :every a power of two up to 64" {:frames n :every every})))
+     (if (= 1 n)
+       (metasprite x y (first frames) options)
+       [[:lda :rt/frame]
+        (repeat (shifts every) [:lsr :a])
+        [:and [:imm (dec n)]]             ; which picture: 0 to n-1
+        (for [[i pieces] (map-indexed vector frames)]
+          [[:cmp [:imm i]]
+           (gen/when-flag :equal
+             (metasprite x y pieces options)
+             [:jmp done])])
+        [:label done]]))))
+
 (defn sprite
   "Draw one 8x8 sprite: (sprite {:x :ball/x :y :ball/y :tile 5})."
   [{:keys [x y tile attributes]}]
