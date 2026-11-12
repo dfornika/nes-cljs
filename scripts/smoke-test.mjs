@@ -155,6 +155,28 @@ try {
     });
   }
 
+  await step('Catch the Stars plays', async () => {
+    // A whole game built in the page: the title screen draws, and Start
+    // begins play (the game's own variables say so, in the Lens tab).
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Catch the Stars")');
+    await page.waitForSelector('.rom-name:has-text("catch")');
+    await until(async () => (await colorsOnScreen()) > 3);
+    await page.click('button:text-is("Lens")');
+    const stateRow = page.locator('tr', {has: page.locator('td:text-is("rt.state")')});
+    await until(async () => (await stateRow.textContent()).includes('title'));
+    await page.keyboard.down('Enter');
+    await until(async () => (await stateRow.textContent()).includes('playing'));
+    await page.keyboard.up('Enter');
+    check(true, 'Catch the Stars: title screen, then Start begins play');
+  });
+  // (the steps below expect Concentration Room to be the game loaded)
+  await step('back to Concentration Room', async () => {
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Concentration Room")');
+    await page.waitForSelector('.rom-name:has-text("croom")');
+  });
+
   await step('emulation runs', async () => {
     // Frames should be advancing: 30 more within a few seconds.
     await page.click('button:text-is("CPU")');

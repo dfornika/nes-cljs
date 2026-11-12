@@ -59,7 +59,7 @@
             [nes.snapshot :as snapshot]
             [nes.text-table :as text-table]))
 
-(def ^:private sizes {:u8 1 :s8 1 :u16 2 :u8.8 2 :s8.8 2 :bool 1 :enum 1})
+(def ^:private sizes {:u8 1 :s8 1 :u16 2 :u8.8 2 :s8.8 2 :bool 1 :enum 1 :bits 1})
 
 (defn- size-of [type]
   (or (sizes type)

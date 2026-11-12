@@ -197,16 +197,51 @@ move to its own repository once its API settles. Games are in
 - [ ] **Simple optimizations** – e.g. drop a `LDA x` straight after `STA x`
 - [ ] **Cycle counts without running** – for straight-line code, from the opcode table (for
   now, `nes.cpu.harness/run-routine` runs the code and reports the cycles it took)
-- [ ] **Runtime skeleton** (next) – reset/init, NMI handler, controller, sprite buffer, a queue of
-  video memory writes, the state machine; then a first real game (single screen)
-- [ ] **Download the built ROM** as a `.nes` file, and build from the command line
-  (the toolkit runs on JVM Clojure too)
+- [x] **Runtime** – `gamedev-toolkit.runtime/program`: a game is its states (`:enter` and
+  `:update` code each) and the runtime is the rest: reset, the NMI handler, the controller
+  (`when-held`, `when-pressed`), sprites (`sprite`, `metasprite`, hidden when not drawn), a queue
+  of background writes (`queue`), whole screens (`draw-screen`, `text`), `random`
+- [x] **A font** – `gamedev-toolkit.font`: A-Z, 0-9 and some punctuation, as tiles
+- [x] **A first game** – `games.catch`, Catch the Stars: title, playing and game over states,
+  fixed-point movement, a bouncing enemy that speeds up, a score. In the Sample ROMs menu
+- [x] **Games run without a console in tests** – `nes.cpu.harness/console`, `boot!`, `frame!`,
+  `hold!`: play a game on the CPU alone, press buttons, check its variables and that each
+  frame's work fits in a frame (and the NMI handler in vertical blank)
+- [x] **Cartridges as EDN** – `gamedev-toolkit.rom-edn`: any ROM as a container (its bytes as
+  hex), a game built here as its source (every instruction, tiles as drawings); both go back to
+  the same `.nes` file. Save from the Cartridge tab, or `(save-edn!)`
+- [x] **Download the built ROM** as a `.nes` file – Cartridge tab, or `(save! (catch/build))`
+- [ ] **Runtime follow-ups** – check the queue for overflow; sound; a second controller;
+  scrolling; more than 64 sprites' worth of flicker handling; pausing
+- [ ] **EDN for ROMs not built here** – bytes the Code tab has seen run become instructions,
+  the rest stay as `[:db ...]`: lossless always, more readable the more you play
+- [ ] **Build from the command line** (the toolkit runs on JVM Clojure too): a `clj -X` entry
+  that writes the `.nes` and `.edn` files
 - [ ] **CHR tile editor** – paint tiles in the Tiles view and write them back into a ROM
 - [ ] **Assets as data** – palettes, screens and levels as EDN
-- [ ] **Engine pieces** – metasprites, metatiles, collision, scrolling, sound, a second mapper
+- [ ] **Engine pieces** – metatiles, collision with the background, scrolling, sound, object
+  slots with spawn and despawn, animation, a second mapper
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the
   assembler from the page
 - [ ] **A small language** of expressions and typed variables that compiles to generators
+
+## Running outside the browser
+
+Non-UI code is written as `.cljc` from here on (the toolkit and games already are), so that
+a JVM emulator could reuse it one day.
+
+- [ ] **Portability, stage one** – a small shared namespace for hex formatting and number
+  parsing, a byte-array wrapper (JVM bytes are signed), and the easy namespaces moved to
+  `.cljc`: `emulator` (protocols), `debug-info`, `memory-map`, `registers`, `disasm`,
+  `cpu.reference`, `lens` and the lenses, `text-table`, `breakpoints`, `nametable`, `snapshot`,
+  `sprites`; then `rom`, `chr`, `code-log`, `routines`. Their tests run on the JVM in CI
+- [ ] **A portable CPU core** – `nes.cpu.core` keeps its registers in a JS object for speed;
+  a `deftype` with mutable fields and a bus protocol would work on both. nestest guards it
+- [ ] **Split `nes.console`** into a portable controller (run, step, breakpoints) and the
+  browser's driver (animation frames, audio, Reagent state)
+- [ ] **Views: what to show, separately from how** – so another front end (HumbleUI?) can
+  reuse the rows of the disassembly, the stack, the lens values, the schematic's layout
+- [ ] A JVM emulator also needs our own PPU, sound and mappers: those are jsnes today
 
 ## Housekeeping
 

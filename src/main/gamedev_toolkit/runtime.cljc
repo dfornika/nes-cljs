@@ -1,0 +1,457 @@
+(ns gamedev-toolkit.runtime
+  "The part of an NES game that's the same in every game, so a game only
+  has to say what's different about it.
+
+  A game is described as a set of *states* (title screen, playing, game
+  over...), each with code to run when it starts (:enter) and code to run
+  every frame while it lasts (:update):
+
+    (program
+     {:name \"mygame.nes\"
+      :variables [[:score :u8] ...]          ; as for gamedev-toolkit.memory
+      :tiles     [...]                       ; the graphics
+      :palettes  [...]                       ; 32 colors
+      :start     :title
+      :states    [[:title   {:enter [...] :update [...]}]
+                  [:playing {:enter [...] :update [...]}]]})
+
+  `program` wraps that in everything else an NES program needs and
+  returns a built cartridge (as gamedev-toolkit.rom/nrom does).
+
+  What the runtime does each frame:
+
+    main loop                          NMI (at every vertical blank)
+    ---------                          ---
+    read the controller                if the main loop finished its frame:
+    if the state changed, run :enter     copy the sprites to the PPU
+    run the state's :update              write queued changes to the background
+    hide the sprites not drawn         set scroll, turn the picture on
+    say 'frame finished', and wait     count the frame
+
+  The split matters because the PPU's memory can only be written while
+  it isn't drawing: during vertical blank, which lasts about 2,270 CPU
+  cycles. So game code never writes to the PPU. It draws sprites into a
+  copy in ordinary memory (`sprite`, `metasprite`), and asks for
+  background changes by adding them to a queue (`queue`); the NMI handler
+  passes both on at the right moment.
+
+  The exception is drawing a whole screen, which is far too much for one
+  vertical blank. `draw-screen` turns the picture off while it does that
+  (the screen goes blank for a moment, as it does in real games between
+  screens).
+
+  What a game's code can use:
+
+    :pad/held :pad/pressed    the controller: buttons down now, and ones
+                              that went down this frame (see `when-held`)
+    :rt/frame                 counts frames
+    (go :playing)             change state
+    (call random)             a random byte in A
+    (sprite ...) (metasprite ...) (queue ...) (draw-screen ...)"
+  (:require [gamedev-toolkit.asm :as asm]
+            [gamedev-toolkit.chr :as chr]
+            [gamedev-toolkit.font :as font]
+            [gamedev-toolkit.gen :as gen]
+            [gamedev-toolkit.hardware :as hw]
+            [gamedev-toolkit.memory :as memory]
+            [gamedev-toolkit.rom :as rom]
+            [gamedev-toolkit.sub :as sub :refer [call]]))
+
+;; ---------------------------------------------------------------------------
+;; The controller
+
+(def read-pad
+  (sub/sub
+   :read-pad
+   "Read controller 1 into :pad/held, and work out :pad/pressed (the
+  buttons that weren't down last frame).
+
+  Writing 1 then 0 to JOY1 makes the controller take a snapshot of its
+  buttons. Each read of JOY1 then gives the next one in bit 0: A, B,
+  Select, Start, Up, Down, Left, Right. LSR moves that bit into the carry
+  flag, and ROL moves the carry into :pad/held from the right. The 1 that
+  :pad/held starts with falls out of the left after 8 ROLs, into the
+  carry, and stops the loop."
+   [(gen/move :pad/previous :pad/held)
+    [:lda [:imm 1]]
+    [:sta :joy1]
+    [:sta :pad/held]
+    [:lsr :a]
+    [:sta :joy1]
+    (gen/do-while :no-carry
+      [:lda :joy1]
+      [:lsr :a]
+      [:rol :pad/held])
+    [:lda :pad/previous]
+    [:eor [:imm 0xFF]]
+    [:and :pad/held]
+    [:sta :pad/pressed]]))
+
+(defn when-held
+  "Run `body` while `button` (:a :b :select :start :up :down :left
+  :right) is down."
+  [button & body]
+  [[:lda :pad/held]
+   [:and [:imm (hw/buttons button)]]
+   (gen/when-flag :not-zero body)])
+
+(defn when-pressed
+  "Run `body` on the frame `button` goes down (once per press)."
+  [button & body]
+  [[:lda :pad/pressed]
+   [:and [:imm (hw/buttons button)]]
+   (gen/when-flag :not-zero body)])
+
+;; ---------------------------------------------------------------------------
+;; States
+
+(defn go
+  "Change to another state: its :enter code runs at the start of the next
+  frame, and its :update from then on."
+  [state]
+  [[:lda [:imm (keyword "state" (name state))]]
+   [:sta :rt/next]])
+
+;; ---------------------------------------------------------------------------
+;; Sprites
+;;
+;; The PPU draws up to 64 sprites, each described by 4 bytes: Y, tile,
+;; attributes (which palette, flipping), X. The game keeps its own copy of
+;; those 256 bytes at :oam, and the NMI handler sends the copy to the PPU
+;; every frame. Each frame the game draws its sprites into the copy from
+;; the start; :rt/oam-next is where the next one goes.
+
+(defn metasprite
+  "Draw a character made of several sprites that move together. `x` and
+  `y` are where its top left is (`src` operands, one byte each), and
+  `pieces` are [tile dx dy] or [tile dx dy attributes]: which tile goes
+  how far right and down of there. Attributes are the sprite palette (0
+  to 3), plus 0x40 to flip it left-right and 0x80 upside down.
+
+  The loop over the pieces runs when the ROM is built: the NES gets the
+  instructions for each piece written out. Uses A and X."
+  [x y pieces]
+  [[:ldx :rt/oam-next]
+   (for [[i [tile dx dy attributes]] (map-indexed vector pieces)
+         :let [at (fn [field] [:+ :oam (+ (* 4 i) field)])]]
+     [[:lda y] (when-not (zero? dy) [[:clc] [:adc [:imm dy]]]) [:sta (at 0) :x]
+      [:lda [:imm tile]]                                       [:sta (at 1) :x]
+      [:lda [:imm (or attributes 0)]]                          [:sta (at 2) :x]
+      [:lda x] (when-not (zero? dx) [[:clc] [:adc [:imm dx]]]) [:sta (at 3) :x]])
+   [:txa]
+   [:clc]
+   [:adc [:imm (* 4 (count pieces))]]
+   [:sta :rt/oam-next]])
+
+(defn sprite
+  "Draw one 8x8 sprite: (sprite {:x :ball/x :y :ball/y :tile 5})."
+  [{:keys [x y tile attributes]}]
+  (metasprite x y [[tile 0 0 attributes]]))
+
+(defn picture
+  "The pieces (for `metasprite`) of a picture that's `width` tiles wide,
+  whose tiles are in the cartridge in reading order from `first-tile`
+  (as gamedev-toolkit.chr/tiles cuts a picture up)."
+  ([first-tile width height] (picture first-tile width height 0))
+  ([first-tile width height attributes]
+   (vec (for [row (range height), col (range width)]
+          [(+ first-tile (* row width) col) (* 8 col) (* 8 row) attributes]))))
+
+(def ^:private hide-unused-sprites
+  (sub/sub
+   :hide-unused-sprites
+   "Move every sprite after the ones drawn this frame off the bottom of
+  the screen (a Y of 240 or more), which is the only way to hide one."
+   [[:ldx :rt/oam-next]
+    [:lda [:imm 0xFF]]
+    (gen/do-while :not-zero              ; until X wraps round to 0
+      [:sta :oam :x]
+      [:inx] [:inx] [:inx] [:inx])]))
+
+;; ---------------------------------------------------------------------------
+;; The background
+
+(defn tile-address
+  "The video memory address of the background tile at column `col` (0 to
+  31) and row `row` (0 to 29)."
+  [col row]
+  (+ (:nametable-0 hw/video) (* 32 row) col))
+
+(defn- set-video-address [addr]
+  [[:lda [:imm (bit-shift-right addr 8)]] [:sta :ppuaddr]
+   [:lda [:imm (bit-and addr 0xFF)]]      [:sta :ppuaddr]])
+
+(defn queue
+  "Ask for some tiles to be written to the background at the next
+  vertical blank, starting at `address` (see `tile-address`) and going
+  right. Each of `tiles` is a `src` operand ([:imm 5], :some-variable),
+  or a sequence of instructions that leaves the tile number in A without
+  changing X:
+
+    (queue (tile-address 17 2)
+           [[:lda :score] [:clc] [:adc [:imm zero-tile]]])
+
+  The queue holds 64 bytes a frame (3 per call, plus 1 per tile), and
+  nothing checks that it isn't overfilled. Uses A and X."
+  [address & tiles]
+  (let [put (fn [load] [load [:sta :video-queue :x] [:inx]])]
+    [[:ldx :rt/queue-end]
+     (put [:lda [:imm (bit-shift-right address 8)]])
+     (put [:lda [:imm (bit-and address 0xFF)]])
+     (put [:lda [:imm (count tiles)]])
+     (for [tile tiles]
+       ;; a sequence of instructions starts with an instruction (a vector)
+       (put (if (and (sequential? tile) (sequential? (first tile)))
+              tile
+              [:lda tile])))
+     [:stx :rt/queue-end]]))
+
+(defn at
+  "Inside `draw-screen`: move to column `col`, row `row`. Tiles written
+  to :ppudata from then on go there, left to right. Uses A."
+  [col row]
+  (set-video-address (tile-address col row)))
+
+(defn text
+  "Inside `draw-screen`: write `string` at column `col`, row `row`, with
+  gamedev-toolkit.font (whose tiles must be the cartridge's first ones).
+  Uses A."
+  [col row string]
+  [(at col row)
+   ;; consecutive equal characters need A loaded only once
+   (for [run (partition-by identity (font/encode string))]
+     [[:lda [:imm (first run)]]
+      (repeat (count run) [:sta :ppudata])])])
+
+(defn clear-background
+  "Inside `draw-screen`: fill the whole background with tile 0, in its
+  first palette. Uses A, X and Y."
+  []
+  [(set-video-address (:nametable-0 hw/video))
+   [:lda [:imm 0]]
+   ;; 1024 bytes: 960 tiles, then the 64 bytes that choose palettes
+   (gen/times 1024 [:sta :ppudata])])
+
+(defn draw-screen
+  "Run `body` with the picture and the NMI turned off, so it can write as
+  much to the background as it likes (with `clear-background`, `text`,
+  `at` and writes to :ppudata). The picture comes back on at the next
+  vertical blank. For :enter code; the screen is blank meanwhile."
+  [& body]
+  [[:lda [:imm 0]]
+   [:sta :ppuctrl]                      ; NMI off: it would use PPUADDR too
+   [:sta :ppumask]                      ; picture off
+   [:sta :rt/queue-end]                 ; anything queued was for the old screen
+   [:bit :ppustatus]                    ; make PPUADDR expect a high byte
+   body
+   [:lda [:imm 0x80]]
+   [:sta :ppuctrl]])                    ; NMI back on; it turns the picture on
+
+;; ---------------------------------------------------------------------------
+;; Random numbers
+
+(def random
+  (sub/sub
+   :random
+   "A random byte, in A (and the flags are set from it). Uses Y.
+
+  It's a 'linear feedback shift register': 16 bits (:rt/seed) shifted
+  left 8 times, with some bits flipped whenever a 1 falls out. The
+  numbers repeat after 65,535 calls, in an order with no obvious pattern.
+  The seed must never be 0 (it would stay 0)."
+   [[:ldy [:imm 8]]
+    [:lda :rt/seed]
+    (gen/do-while :not-zero
+      [:asl :a]
+      [:rol [:+ :rt/seed 1]]
+      (gen/when-flag :carry
+        [:eor [:imm 0x39]])
+      [:dey])
+    [:sta :rt/seed]
+    [:cmp [:imm 0]]]))
+
+(defn stir-random
+  "Mix the frame count into the random numbers. Do it when the player
+  presses something: nobody presses Start on exactly the same frame
+  twice, so each game gets different numbers. Uses A."
+  []
+  [[:lda :rt/frame]
+   [:eor :rt/seed]
+   [:ora [:imm 1]]                      ; never 0
+   [:sta :rt/seed]])
+
+;; ---------------------------------------------------------------------------
+;; The program around the game
+
+(defn- runtime-variables [state-names]
+  [[:rt {:frame     :u8
+         :ready     :bool                ; the main loop has finished a frame
+         :mask      :u8                  ; what the NMI writes to PPUMASK
+         :state     [:enum (assoc (zipmap (range) state-names) 0xFF :none)]
+         :next      [:enum (zipmap (range) state-names)]
+         :oam-next  :u8
+         :queue-end :u8
+         :seed      :u16}]
+   [:pad {:held     [:bits hw/button-bits]
+          :pressed  [:bits hw/button-bits]
+          :previous [:bits hw/button-bits]}]
+   ;; the copy of sprite memory: a whole page, and $0200 by convention
+   [:oam [:array 256 :u8] {:at 0x0200 :hide true}]
+   [:video-queue [:array 64 :u8] {:hide true}]])
+
+(defn- wait-for-vblank []
+  (gen/do-while :positive
+    [:bit :ppustatus]))
+
+(defn- reset-code [start]
+  [[:label :reset]
+   [:sei]                               ; no interrupts while setting up
+   [:cld]                               ; decimal mode off (the NES has none)
+   [:ldx [:imm 0x40]] [:stx :apu-frame] ; turn off the sound chip's interrupt
+   [:ldx [:imm 0xFF]] [:txs]            ; the stack starts at $01FF
+   [:inx]
+   [:stx :ppuctrl]                      ; NMI off
+   [:stx :ppumask]                      ; picture off
+   [:stx :dmc-freq]                     ; sample interrupts off
+
+   ;; The PPU needs about two frames to warm up. Meanwhile, clear all
+   ;; 2 KB of RAM (it holds garbage at power on) and hide the sprites.
+   (wait-for-vblank)
+   (gen/fill 0x0000 0x800 [:imm 0])
+   (gen/fill :oam 256 [:imm 0xFF])
+   (wait-for-vblank)
+
+   ;; Copy the 32 palette colors to video memory.
+   (set-video-address (:palettes hw/video))
+   [:ldx [:imm 0]]
+   (gen/do-while :not-equal
+     [:lda :palettes :x]
+     [:sta :ppudata]
+     [:inx]
+     [:cpx [:imm 32]])
+
+   (gen/move :rt/mask [:imm 0x1E])      ; show background and sprites
+   (gen/move :rt/state [:imm 0xFF])     ; no state yet, so the first one is 'entered'
+   (gen/move :rt/next [:imm (keyword "state" (name start))])
+   (gen/move16 :rt/seed [:imm 0xC0DE])
+
+   [:lda [:imm 0x80]]
+   [:sta :ppuctrl]])                    ; NMI on
+
+(defn- dispatch
+  "Call the subroutine in `subs` (in state order) for the state in
+  :rt/state. With a handful of states, comparing against each in turn is
+  as good as anything cleverer."
+  [subs]
+  (let [done (asm/genlabel "dispatched")]
+    [[:lda :rt/state]
+     (for [[i s] (map-indexed vector subs)]
+       [[:cmp [:imm i]]
+        (gen/when-flag :equal
+          (call s)
+          [:jmp done])])
+     [:label done]]))
+
+(defn- main-loop [enters updates]
+  [[:label :main]
+   (call read-pad)
+
+   [:lda :rt/next]
+   [:cmp :rt/state]
+   (gen/when-flag :not-equal
+     [:sta :rt/state]
+     (dispatch enters))
+
+   (gen/move :rt/oam-next [:imm 0])
+   (dispatch updates)
+   (call hide-unused-sprites)
+
+   ;; Tell the NMI handler this frame's sprites and queue are complete,
+   ;; then wait for it to count the frame.
+   (gen/move :rt/ready [:imm 1])
+   [:lda :rt/frame]
+   [:label :wait-for-frame]
+   [:cmp :rt/frame]
+   [:beq :wait-for-frame]
+   [:jmp :main]])
+
+(def ^:private nmi
+  [[:label :nmi]
+   [:pha] [:txa] [:pha] [:tya] [:pha]   ; the main loop was using these
+
+   [:lda :rt/ready]
+   (gen/when-flag :not-zero
+     ;; sprites: copy the page at :oam to the PPU's sprite memory
+     [:lda [:imm 0]] [:sta :oamaddr]
+     [:lda [:imm [:hi :oam]]] [:sta :oamdma]
+
+     ;; the queue: entries of address (high, low), count, then the tiles
+     [:bit :ppustatus]
+     [:ldx [:imm 0]]
+     [:label :flush-queue]
+     [:cpx :rt/queue-end]
+     (gen/when-flag :no-carry           ; X < the end: there's another entry
+       [:lda :video-queue :x] [:sta :ppuaddr] [:inx]
+       [:lda :video-queue :x] [:sta :ppuaddr] [:inx]
+       [:ldy :video-queue :x] [:inx]
+       (gen/do-while :not-zero
+         [:lda :video-queue :x] [:sta :ppudata] [:inx]
+         [:dey])
+       [:jmp :flush-queue])
+     [:lda [:imm 0]]
+     [:sta :rt/queue-end]
+     [:sta :rt/ready])
+
+   ;; Writing PPUADDR moves where the picture is drawn from: put it back.
+   [:bit :ppustatus]
+   [:lda [:imm 0x80]] [:sta :ppuctrl]
+   [:lda [:imm 0]] [:sta :ppuscroll] [:sta :ppuscroll]
+   [:lda :rt/mask] [:sta :ppumask]
+
+   [:inc :rt/frame]
+
+   [:pla] [:tay] [:pla] [:tax] [:pla]
+   [:rti]])
+
+(def ^:private irq
+  [[:label :irq]
+   [:rti]])
+
+(defn program
+  "Build a game (see the namespace docstring) into a cartridge.
+
+    :name       the ROM's file name
+    :states     [[name {:enter forms :update forms}] ...]; :enter and
+                :update are both optional
+    :start      the state to begin in
+    :variables  the game's variables, as for memory/allocate
+    :tiles      the graphics, as 16-byte tiles (see gamedev-toolkit.chr),
+                from tile 0. To use `text`, put gamedev-toolkit.font/tiles first
+    :palettes   32 colors: four background palettes, then four for sprites
+
+  Returns what rom/nrom returns, with :name."
+  [{:keys [name states start variables tiles palettes]}]
+  (let [states (vec states)
+        state-names (mapv first states)
+        _ (when-not (some #{start} state-names)
+            (throw (ex-info (str ":start is " (pr-str start) ", which isn't one of the states " state-names) {})))
+        _ (when-not (= 32 (count palettes))
+            (throw (ex-info (str ":palettes needs 32 colors, not " (count palettes)) {})))
+        state-sub (fn [phase [state-name state]]
+                    (sub/sub (keyword (str (clojure.core/name state-name) "-" (clojure.core/name phase)))
+                             (get state phase [])))]
+    (assoc (rom/nrom
+            {:code [(reset-code start)
+                    (main-loop (map #(state-sub :enter %) states)
+                               (map #(state-sub :update %) states))
+                    nmi
+                    irq
+                    [:label :palettes]
+                    [:db palettes]]
+             :vectors {:nmi :nmi :reset :reset :irq :irq}
+             :symbols (merge hw/registers
+                             (into {} (map-indexed (fn [i n] [(keyword "state" (clojure.core/name n)) i])
+                                                   state-names)))
+             :memory (memory/allocate (concat (runtime-variables state-names) variables))
+             :chr (chr/bank tiles)})
+           :name name)))

@@ -71,3 +71,21 @@
     (when (> (count bytes) bank-size)
       (throw (ex-info (str (count tiles) " tiles don't fit in 8 KB of CHR ROM (512 at most)") {})))
     (into bytes (repeat (- bank-size (count bytes)) 0))))
+
+(defn rows
+  "The reverse of `tile`: a tile's 16 bytes as 8 strings of `.` `1` `2` `3`."
+  [tile-bytes]
+  (let [tile-bytes (vec tile-bytes)]
+    (vec (for [y (range 8)]
+           (apply str (for [x (range 7 -1 -1)
+                            :let [p (+ (bit-and (bit-shift-right (tile-bytes y) x) 1)
+                                       (* 2 (bit-and (bit-shift-right (tile-bytes (+ 8 y)) x) 1)))]]
+                        (if (zero? p) "." p)))))))
+
+(defn bank-tiles
+  "The reverse of `bank`: the tiles in some CHR ROM, 16 bytes each,
+  without the empty ones at the end."
+  [chr-bytes]
+  (let [tiles (mapv vec (partition 16 chr-bytes))
+        used (count (drop-while #(every? zero? %) (reverse tiles)))]
+    (subvec tiles 0 used)))

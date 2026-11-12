@@ -131,8 +131,9 @@
 ;; give the usual shapes (if, when, loops) made from them. A condition is
 ;; named after its branch instruction, or spelled out:
 ;;
-;;   :eq :zero       zero flag set: the last result was 0, or a compare found equal
-;;   :ne :not-zero   zero flag clear
+;;   :eq :zero :equal          zero flag set: the last result was 0, or a
+;;                             compare found the two equal
+;;   :ne :not-zero :not-equal  zero flag clear
 ;;   :cs :carry      carry set: an add overflowed, or a compare found >=
 ;;   :cc :no-carry   carry clear
 ;;   :mi :negative   bit 7 of the last result was set
@@ -140,7 +141,7 @@
 ;;   :vs :vc         overflow set / clear
 
 (def ^:private conditions
-  {:eq :eq :zero :eq, :ne :ne :not-zero :ne
+  {:eq :eq :zero :eq :equal :eq, :ne :ne :not-zero :ne :not-equal :ne
    :cs :cs :carry :cs, :cc :cc :no-carry :cc
    :mi :mi :negative :mi, :pl :pl :positive :pl
    :vs :vs, :vc :vc})
@@ -506,6 +507,53 @@
      [:label done]]))
 
 ;; ---------------------------------------------------------------------------
+;; More arithmetic for games
+
+(defn negate16
+  "dst = -dst (two bytes): turns a speed around. Uses A."
+  [dst]
+  [[:sec]
+   [:lda [:imm 0]] [:sbc (lo dst)] [:sta (lo dst)]
+   [:lda [:imm 0]] [:sbc (hi dst)] [:sta (hi dst)]])
+
+(defn abs-difference
+  "A = how far apart the bytes `a` and `b` are, whichever is bigger."
+  [a b]
+  [[:lda a] [:sec] [:sbc b]
+   ;; carry clear means it went below zero: flip it to positive
+   (when-flag :no-carry
+     [:eor [:imm 0xFF]]
+     [:adc [:imm 1]])])
+
+(defn when-close
+  "Run `body` if two points are within `distance` of each other both
+  across and down: a simple test for two things touching. Each point is
+  [x y], as `src` operands (one byte each). Uses A."
+  [[ax ay] [bx by] distance & body]
+  [(abs-difference ax bx)
+   [:cmp [:imm distance]]
+   (when-flag :no-carry
+     (abs-difference ay by)
+     [:cmp [:imm distance]]
+     (when-flag :no-carry body))])
+
+(defn inc-decimal
+  "Add 1 to a number kept as `n` decimal digits, one per byte, most
+  significant first (as scores usually are on the NES: a digit is ready
+  to show without dividing by ten). 999 wraps to 000. Uses A."
+  [digits n]
+  (let [done (asm/genlabel "counted")]
+    [(for [i (range (dec n) -1 -1)
+           :let [digit (if (zero? i) digits [:+ digits i])]]
+       [[:inc digit]
+        [:lda digit]
+        [:cmp [:imm 10]]
+        [:bne done]                      ; no carry into the next digit
+        [:lda [:imm 0]]
+        [:sta digit]])
+     [:label done]]))
+
+;; ---------------------------------------------------------------------------
 ;; Fixed point
 ;;
 ;; To move 1.5 pixels a frame, a position needs a fraction. The usual
@@ -526,3 +574,20 @@
   at `addr` (its second byte): [:lda (whole :player/x)]"
   [addr]
   (hi addr))
+
+(defn clamp-fixed
+  "Keep the 8.8 fixed-point variable at `addr` between the whole numbers
+  `least` and `most`: if it's gone past either, put it back there. `body`
+  (optional) also runs when that happens, e.g. to turn a speed around.
+  Uses A."
+  [addr least most & body]
+  [[:lda (whole addr)]
+   [:cmp [:imm least]]
+   (when-flag :no-carry                  ; below `least`
+     (move16 addr [:imm (fixed least)])
+     body)
+   [:lda (whole addr)]
+   [:cmp [:imm (inc most)]]
+   (when-flag :carry                     ; above `most`
+     (move16 addr [:imm (fixed most)])
+     body)])
