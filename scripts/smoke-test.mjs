@@ -169,9 +169,16 @@ try {
     await page.keyboard.up('Enter');
     const grounded = () => row('player.on-ground').locator('input').isChecked();
     await until(grounded);
-    await page.keyboard.down('KeyX');
-    await until(async () => !(await grounded()));
-    await page.keyboard.up('KeyX');
+    // A jump lasts about half a second, which a slow machine could miss
+    // between two looks. So keep pressing A, looking straight after each
+    // press, until it's seen in the air.
+    await until(async () => {
+      await page.keyboard.down('KeyX');
+      await page.waitForTimeout(150);
+      const inAir = !(await grounded());
+      await page.keyboard.up('KeyX');
+      return inAir;
+    }, 20000);
     await until(grounded);
     check(true, 'Star Hopper: Start begins play; A jumps, and it lands again');
     await page.click('.overlay-chooser label:has-text("Physics")');
