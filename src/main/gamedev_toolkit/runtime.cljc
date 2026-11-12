@@ -56,7 +56,8 @@
     :rt/state :rt/next        the current state, and the one asked for
     (transition :playing)     ask for a transition to another state
     (call random)             a random byte in A
-    (sprite ...) (metasprite ...) (queue ...) (draw-screen ...)"
+    (sprite ...) (metasprite ...) (queue ...) (draw-screen ...)
+    (background :title)       inside draw-screen: a whole screen from :screens"
   (:require [gamedev-toolkit.asm :as asm]
             [gamedev-toolkit.chr :as chr]
             [gamedev-toolkit.font :as font]
@@ -64,6 +65,7 @@
             [gamedev-toolkit.hardware :as hw]
             [gamedev-toolkit.memory :as memory]
             [gamedev-toolkit.rom :as rom]
+            [gamedev-toolkit.screen :as screen]
             [gamedev-toolkit.sub :as sub :refer [call]]))
 
 ;; ---------------------------------------------------------------------------
@@ -243,6 +245,35 @@
    ;; 1024 bytes: 960 tiles, then the 64 bytes that choose palettes
    (gen/times 1024 [:sta :ppudata])])
 
+(def ^:private unpack-to-video
+  (sub/sub
+   :unpack-to-video
+   "Write packed bytes (see gamedev-toolkit.screen/pack) to video memory,
+  from wherever PPUADDR points. :rt/pointer points at the packed bytes:
+  pairs of a count and a value, ending with a count of 0."
+   (let [done (asm/genlabel "unpacked")]
+     [(gen/forever
+        [:ldy [:imm 0]]
+        [:lda [:ind :rt/pointer] :y]         ; how many
+        [:beq done]                          ; none: that's the end
+        [:tax]
+        [:iny]
+        [:lda [:ind :rt/pointer] :y]         ; of what
+        (gen/do-while :not-zero
+          [:sta :ppudata]
+          [:dex])
+        (gen/add16 :rt/pointer [:imm 2]))
+      [:label done]])))
+
+(defn background
+  "Inside `draw-screen`: draw the whole background from the screen called
+  `name` (one of the game's :screens), tiles and palettes both. Uses A, X
+  and Y."
+  [name]
+  [(set-video-address (:nametable-0 hw/video))
+   (gen/move16 :rt/pointer [:imm (keyword "screen" (clojure.core/name name))])
+   (call unpack-to-video)])
+
 (defn draw-screen
   "Run `body` with the picture and the NMI turned off, so it can write as
   much to the background as it likes (with `clear-background`, `text`,
@@ -302,7 +333,8 @@
          :next      [:enum (zipmap (range) state-names)]
          :oam-next  :u8
          :queue-end :u8
-         :seed      :u16}]
+         :seed      :u16
+         :pointer   :u16}]               ; for reading tables in the ROM
    [:pad {:held     [:bits hw/button-bits]
           :pressed  [:bits hw/button-bits]
           :previous [:bits hw/button-bits]}]
@@ -443,9 +475,12 @@
     :tiles      the graphics, as 16-byte tiles (see gamedev-toolkit.chr),
                 from tile 0. To use `text`, put gamedev-toolkit.font/tiles first
     :palettes   32 colors: four background palettes, then four for sprites
+                (see gamedev-toolkit.palette)
+    :screens    {name screen}: backgrounds (see gamedev-toolkit.screen), drawn
+                with (background name) inside draw-screen
 
   Returns what rom/nrom returns, with :name."
-  [{:keys [name states initial variables tiles palettes]}]
+  [{:keys [name states initial variables tiles palettes screens]}]
   (let [states (vec states)
         state-names (mapv first states)
         _ (when-not (some #{initial} state-names)
@@ -464,7 +499,10 @@
                     nmi
                     irq
                     [:label :palettes]
-                    [:db palettes]]
+                    [:db palettes]
+                    (for [[screen-name s] screens]
+                      [[:label (keyword "screen" (clojure.core/name screen-name))]
+                       [:db (screen/pack (screen/nametable s))]])]
              :vectors {:nmi :nmi :reset :reset :irq :irq}
              :symbols (merge hw/registers
                              (into {} (map-indexed (fn [i n] [(keyword "state" (clojure.core/name n)) i])

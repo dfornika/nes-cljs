@@ -233,7 +233,7 @@
          [:div {:style {:margin-top "6px" :font-size "13px" :background "#fbefff"
                         :border "1px solid #d8b9ff" :border-radius "6px" :padding "4px 10px"}}
           "You've changed " patched (if (= 1 patched) " byte" " bytes")
-          " of the ROM (from the Lens tab or the REPL), in the running game. The changes last until you load another ROM. "
+          " of the ROM (from the Lens tab, the Tiles tab or the REPL), in the running game. The changes last until you load another ROM. "
           [:a {:href "#" :on-click (fn [e] (.preventDefault e) (console/download-rom!))}
            "Download the changed ROM"]])
        ;; the cartridge as text: see gamedev-toolkit.rom-edn

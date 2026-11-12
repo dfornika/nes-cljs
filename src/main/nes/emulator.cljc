@@ -100,8 +100,18 @@
     "Change the cartridge's program ROM: the byte at `offset` in the iNES
     file (counting the 16-byte header, as hex editors do). Takes effect in
     the running game straight away, and lasts until another ROM is loaded.
-    Returns true, or false if `offset` isn't in the program ROM (CHR ROM
-    can't be changed this way)."))
+    Returns true, or false if `offset` isn't in the program ROM (for the
+    graphics, see `tile-poke!`).")
+  (tile-poke! [emu addr value]
+    "Change a byte of tile graphics: PPU address `addr` ($0000-$1FFF, the
+    two pattern tables), as the PPU sees them right now. The picture
+    changes straight away. Returns where the change went:
+      :rom   into the cartridge's CHR ROM as well, so it survives Reset
+             and is in the file from `rom-file`
+      :live  only into the PPU's memory: the tiles there came from CHR
+             RAM, or from a bank that couldn't be identified, so it lasts
+             until the game writes or switches them again
+      false  `addr` isn't in the pattern tables"))
 
 (defprotocol BusMonitor
   "Watching the traffic on the CPU's bus. Monitoring slows emulation down

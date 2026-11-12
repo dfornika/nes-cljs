@@ -155,6 +155,29 @@ try {
     });
   }
 
+  await step('painting a tile', async () => {
+    // In the Tiles tab, paint the top left pixel of the Hello ROM's face
+    // tile: the tile's text changes, and the cartridge is marked changed.
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Hello")');
+    await page.waitForSelector('.rom-name:has-text("hello")');
+    await page.click('button:text-is("Tiles (CHR)")');
+    // tile 1 is the second tile of pattern table 0 (each is 16 pixels wide here)
+    await page.locator('canvas').nth(1).click({position: {x: 24, y: 8}});
+    await page.waitForSelector('text=Paint tile $01');
+    const text = () => page.locator('.tile-text').textContent();
+    const before = await text();
+    await page.locator('.tile-color-on').waitFor();
+    await page.click('.tile-editor button:text-is("3")');
+    await page.locator('.tile-paint > div').first().dispatchEvent('pointerdown', {buttons: 1, pointerId: 1});
+    const after = await until(async () => { const t = await text(); return t !== before && t; });
+    check(after.startsWith('["3'), `painting a tile: the pixel changes (${after.slice(0, 12)}…)`);
+    await page.waitForSelector('text=Changed in the cartridge too');
+    await page.click('button:text-is("Cartridge")');
+    await page.waitForSelector('text=Download the changed ROM');
+    check(true, 'painting a tile: the change goes into the cartridge');
+  });
+
   await step('Catch the Stars plays', async () => {
     // A whole game built in the page: the title screen draws, and Start
     // begins play (the game's own variables say so, in the Lens tab).

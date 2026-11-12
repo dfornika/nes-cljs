@@ -70,7 +70,15 @@
   for games built here) or :container (its bytes as hex: any ROM)."
   [{:keys [sha1]} kind]
   (case kind
-    :source (some-> (built-game sha1) rom-edn/source rom-edn/write)
+    ;; with the tiles as they are now, in case they've been painted on in
+    ;; the Tiles tab since the game was built
+    :source (when-let [built (built-game sha1)]
+              (let [file (some-> (console/emulator-instance) emu/rom-file array-seq vec)
+                    chr-size (count (get-in built [:source :chr]))
+                    built (cond-> built
+                            (and file (pos? chr-size))
+                            (assoc-in [:source :chr] (subvec file (- (count file) chr-size))))]
+                (rom-edn/write (rom-edn/source built))))
     :container (some-> (console/emulator-instance) emu/rom-file array-seq rom-edn/container rom-edn/write)))
 
 (defn save-edn!

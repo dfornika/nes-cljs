@@ -415,6 +415,21 @@
       (refresh-inspectors! :step)
       done)))
 
+(defn poke-tiles!
+  "Change bytes of tile graphics in the running game: `writes` is a seq
+  of [ppu-address value] (see nes.chr/pixel-writes). Returns where the
+  changes went: :rom (into the cartridge too), :live (only the PPU's
+  memory), or nil if nothing was written. See emu/tile-poke!."
+  [writes]
+  (when-let [e @emulator]
+    (let [results (doall (keep (fn [[addr value]] (emu/tile-poke! e addr value)) writes))
+          in-rom (count (filter #{:rom} results))]
+      (when (pos? in-rom)
+        (swap! db update-in [:rom :patched] (fnil + 0) in-rom))
+      (refresh-inspectors! :step)
+      (cond (pos? in-rom) :rom
+            (seq results) :live))))
+
 (defn download-rom!
   "Save the cartridge, with any changes made to it, as a .nes file."
   []

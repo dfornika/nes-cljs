@@ -1,7 +1,9 @@
 (ns nes.tiles-view
   "The CHR / tile viewer: the two pattern tables the PPU currently sees,
-  and a close-up of one tile showing how its 16 bytes become pixels."
-  (:require [reagent.core :as r]
+  a close-up of one tile showing how its 16 bytes become pixels, and an
+  editor for painting on a tile."
+  (:require [clojure.string :as str]
+            [reagent.core :as r]
             [nes.canvas :refer [pixel-canvas]]
             [nes.chr :as chr]
             [nes.console :as console]
@@ -9,11 +11,14 @@
 
 (def ^:private scale 2)
 
-;; Which palette to color tiles with, and which tile is under the mouse /
-;; selected. `defonce` so it survives hot reloads.
+;; Which palette to color tiles with, which tile is under the mouse /
+;; selected, and for painting: the color in use (0-3) and where the last
+;; change went. `defonce` so it survives hot reloads.
 (defonce ^:private view (r/atom {:palette :gray
                                  :selected {:table 0 :tile 0}
-                                 :hover nil}))
+                                 :hover nil
+                                 :color 1
+                                 :painted nil}))
 
 (defn- hex [n width]
   (str "$" (.padStart (.toUpperCase (.toString n 16)) width "0")))
@@ -98,9 +103,90 @@
                                        (swap! view assoc :hover {:table table :tile t}))
                      :on-mouse-leave #(swap! view assoc :hover nil)
                      :on-click #(when-let [t (tile-under-mouse %)]
-                                  (swap! view assoc :selected {:table table :tile t}))}]
+                                  (swap! view assoc :selected {:table table :tile t} :painted nil))}]
       (when (= table (:table hover)) [outline (:tile hover) "#ff8182"])
       (when (= table (:table selected)) [outline (:tile selected) "#54aeff"])]]))
+
+;; ---------------------------------------------------------------------------
+;; Painting
+
+(def ^:private paint-cell 22)
+
+(defn- paint!
+  "Give pixel `x`, `y` of the tile at `addr` the color in use."
+  [emulator addr x y]
+  (let [mem (emu/ppu-memory emulator)
+        color (:color @view)]
+    (when (not= color (chr/pixel mem addr x y))
+      (swap! view assoc :painted (console/poke-tiles! (chr/pixel-writes mem addr x y color))))))
+
+(defn- tile-editor
+  "The selected tile, big, to paint on. `_tick` is the inspector tick, so
+  it keeps up with the game."
+  [emulator _tick]
+  (let [{:keys [palette selected color painted]} @view
+        {:keys [table tile]} selected
+        mem (emu/ppu-memory emulator)
+        addr (chr/tile-address table tile)
+        pixels (chr/tile-pixels mem addr)
+        colors (colors-for emulator palette)
+        text (chr/tile-text mem addr)
+        as-code (str "[" (str/join "\n " (map pr-str text)) "]")
+        muted {:color "#57606a" :font-size "12px"}]
+    [:div {:class "tile-editor" :style {:max-width "260px"}}
+     [:div {:style {:margin-bottom "4px"}}
+      [:strong "Paint tile " (hex tile 2)] " " [:small {:style {:color "#57606a"}} "(table " table ")"]]
+     ;; the four colors a tile can use: numbers, given colors by a palette
+     [:div {:style {:display "flex" :gap "4px" :margin-bottom "6px" :align-items "center"}}
+      (for [c (range 4)]
+        ^{:key c}
+        [:button {:on-click #(swap! view assoc :color c)
+                  :class (when (= c color) "tile-color-on")
+                  :title (if (zero? c)
+                           "Color 0: transparent (the backdrop shows, or in a sprite, what's behind it)"
+                           (str "Color " c ": whatever the palette drawing this tile makes it"))
+                  :style {:width "34px" :height "26px" :cursor "pointer" :padding 0
+                          :font-family "ui-monospace, Menlo, Consolas, monospace" :font-size "12px"
+                          :background (chr/bgr->css (nth colors c))
+                          :color (if (chr/light? (nth colors c)) "black" "white")
+                          :border (if (= c color) "3px solid #0969da" "1px solid #8c959f")}}
+         c])]
+     ;; Press and drag to paint. (touch-action none: a finger paints, too,
+     ;; instead of scrolling the page.)
+     [:div {:class "tile-paint"
+            :style {:display "grid" :grid-template-columns (str "repeat(8, " paint-cell "px)")
+                    :width "fit-content" :border "1px solid #8c959f" :cursor "crosshair"
+                    :touch-action "none" :user-select "none"}}
+      (for [[y row] (map-indexed vector pixels)
+            [x v] (map-indexed vector row)]
+        ^{:key (+ x (* 8 y))}
+        [:div {:data-color v
+               :on-pointer-down (fn [^js e]
+                                  ;; let the pointer paint the cells it moves over next
+                                  (some-> (.-target e) (.releasePointerCapture (.-pointerId e)))
+                                  (paint! emulator addr x y))
+               :on-pointer-enter (fn [^js e]
+                                   (when (= 1 (.-buttons e)) (paint! emulator addr x y)))
+               :style {:width paint-cell :height paint-cell :box-sizing "border-box"
+                       :border "1px solid rgba(140, 149, 159, 0.35)"
+                       :background (chr/bgr->css (nth colors v))}}])]
+     [:div {:style (merge muted {:margin-top "4px"})}
+      (case painted
+        :rom "Changed in the cartridge too: it survives Reset, and is in the ROM you download from the Cartridge tab."
+        :live (str "Changed in the PPU's memory only. This game keeps its tiles in RAM, or switches banks of them, "
+                   "so the change lasts until the game writes or switches them again.")
+        "Pick a color, then press and drag on the tile. The game's picture changes as you paint.")]
+     ;; the tile as gamedev-toolkit draws tiles in a game's source
+     [:div {:style {:margin-top "8px"}}
+      [:div {:style (merge muted {:display "flex" :justify-content "space-between" :align-items "center"})}
+       [:span "As text, for a game's source:"]
+       [:button {:style {:font-size "11px"}
+                 :on-click #(some-> js/navigator .-clipboard (.writeText as-code))}
+        "Copy"]]
+      [:pre {:class "tile-text"
+             :style {:margin "2px 0 0" :padding "4px 8px" :background "#f6f8fa" :border-radius "4px"
+                     :font-size "12px" :line-height "1.25"}}
+       as-code]]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Tile close-up
@@ -182,9 +268,11 @@
        [:p {:style {:margin-top 0 :color "#57606a" :font-size "14px"}}
         "Every graphic on the NES is built from 8×8 tiles like these. "
         "This is what the PPU can see right now - games with bank switching "
-        "or CHR RAM change it as they run. Hover or click a tile to see how it's stored."]
+        "or CHR RAM change it as they run. Hover or click a tile to see how it's stored; "
+        "click one to paint on it."]
        [palette-picker emulator]
        [:div {:style {:display "flex" :gap "16px" :flex-wrap "wrap" :margin-top "8px"}}
         [pattern-table emulator 0 tick]
-        [pattern-table emulator 1 tick]]
+        [pattern-table emulator 1 tick]
+        [tile-editor emulator tick]]
        [tile-detail emulator tick]])))

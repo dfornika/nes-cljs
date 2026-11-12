@@ -325,6 +325,43 @@
           true)
         false)))
 
+  (tile-poke! [_ addr value]
+    (if-not (<= 0 addr 0x1FFF)
+      false
+      (let [^js ppu (.-ppu nes)
+            ^js rom (.-rom nes)
+            ^js vram (.-vramMem ppu)
+            v (bit-and value 0xFF)
+            half (bit-and addr 0x1000)      ; which pattern table
+            in-half (bit-and addr 0x0FFF)
+            ;; jsnes copies a 4 KB bank of CHR ROM into the PPU's memory
+            ;; when the mapper switches it in. Find which bank is showing
+            ;; in this pattern table by comparing contents (before the
+            ;; change), as rom-poke! does for program ROM. Mappers that
+            ;; switch smaller pieces won't match any, and that's fine.
+            bank (first (filter (fn [b]
+                                  (let [^js data (aget (.-vrom rom) b)]
+                                    (loop [i 0]
+                                      (cond (= i 4096) true
+                                            (not= (aget vram (+ half i)) (aget data i)) false
+                                            :else (recur (inc i))))))
+                                (range (.-vromCount rom))))]
+        ;; the PPU's memory, and the decoded copy of the tile it draws from
+        (aset vram addr v)
+        (.patternWrite ppu addr v)
+        (if (nil? bank)
+          :live
+          (let [^js data (aget (.-vrom rom) bank)
+                ^js tile (aget (aget (.-vromTile rom) bank) (bit-shift-right in-half 4))
+                row (bit-and in-half 15)
+                chr-start (+ 16 (if (.-trainer rom) 512 0) (* 16384 (.-romCount rom)))]
+            (aset data in-half v)
+            (if (< row 8)
+              (.setScanline tile row v (aget data (+ in-half 8)))
+              (.setScanline tile (- row 8) (aget data (- in-half 8)) v))
+            (aset (.-romFile state) (+ chr-start (* 4096 bank) in-half) v)
+            :rom)))))
+
   emu/BusMonitor
   (monitor-bus! [_ on?]
     (cond

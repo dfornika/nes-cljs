@@ -4,6 +4,7 @@
             [gamedev-toolkit.font :as font]
             [gamedev-toolkit.gen :as gen]
             [gamedev-toolkit.runtime :as rt]
+            [gamedev-toolkit.screen :as screen]
             [gamedev-toolkit.sub :refer [call]]
             [nes.chr]
             [nes.cpu.harness :as harness]))
@@ -72,6 +73,29 @@
     (is (= 0x83 (harness/peek-at m 0x2006)) "written at row 4, column 3: $2083")
     (harness/frame! m)
     (is (= [30 6 0 1] (sprite 1)) "sprites are drawn afresh each frame")))
+
+(deftest unpacking-a-background
+  ;; The runtime's unpacker, run by itself: PPUDATA is an ordinary byte of
+  ;; memory here, so count the writes by making each one also bump a
+  ;; counter... which it can't. Instead, unpack to a table: the routine
+  ;; under test is the same loop with a store to memory.
+  (let [bytes (vec (concat (repeat 300 9) [1 2 3] (repeat 40 0) [5]))
+        packed (screen/pack bytes)
+        m (harness/boot!
+           (harness/console
+            (rt/program {:name "t.nes" :initial :only :tiles font/tiles :palettes (repeat 32 0x0F)
+                         :screens {:test {:tiles (take 960 (concat bytes (repeat 0))) :attributes (repeat 64 0)}}
+                         :states [[:only {:enter [(rt/draw-screen (rt/background :test))]}]]})))]
+    (harness/frame! m)
+    (is (= 0 (harness/peek-at m 0x2007)) "the last byte written to PPUDATA was the last attribute")
+    (is (= 0x80 (harness/peek-at m 0x2000)) "and the NMI is back on afterwards")
+    (testing "the pointer ends on the packed data's final 0"
+      (let [pointer (+ (harness/peek-at m :rt/pointer) (* 256 (harness/peek-at m (inc (get (:symbols m) :rt/pointer)))))
+            start (get (:labels m) :screen/test)
+            length (count (screen/pack (concat (take 960 (concat bytes (repeat 0))) (repeat 64 0))))]
+        (is (= (+ start length -1) pointer))
+        (is (= 0 (harness/peek-at m pointer)))))
+    (is (pos? (count packed)))))
 
 (deftest random-numbers
   ;; call `random` 600 times, collecting the bytes
