@@ -59,3 +59,46 @@
     (is (= [[0 0 0 2] [1 8 0 2] [2 0 8 2] [3 8 8 2]] (tileset/sprites ts :thing 2)))
     (is (= [[1 0 0 0x42] [0 8 0 0x42] [3 0 8 0x42] [2 8 8 0x42]] (tileset/sprites-flipped ts :thing 2))
         "the tiles swap sides, and each is flipped")))
+
+(deftest kinds-of-block
+  (let [s (screen/screen {:metatiles {:air {:tiles [0 0 0 0] :palette 0}
+                                      :rock {:tiles [1 1 1 1] :palette 0 :kind :solid}
+                                      :old-rock {:tiles [1 1 1 1] :palette 0 :solid? true}
+                                      :plank {:tiles [2 2 2 2] :palette 0 :kind :one-way}
+                                      :ladder {:tiles [3 3 3 3] :palette 0 :kind :ladder}}
+                          :legend {\. :air \# :rock \% :old-rock \= :plank \H :ladder}
+                          :rows (-> (vec (repeat 15 "................"))
+                                    (assoc 0 "H.......H......."
+                                           1 "H.......=......."
+                                           2 "H......%H#......"))})
+        at (fn [col row] (nth (:solid s) (+ (* 16 row) col)))]
+    (is (= [4 3 3] (map #(at 0 %) [0 1 2])) "a ladder's top block is its top: climbable, and stood on")
+    (is (= [4 2 4] (map #(at 8 %) [0 1 2])) "a ladder under a plank has a top of its own")
+    (is (= [1 1] [(at 7 2) (at 9 2)]) ":solid? true still means solid")
+    (is (zero? (at 1 0))))
+  (is (thrown? #?(:clj Exception :cljs js/Error)
+               (screen/screen {:metatiles {:x {:tiles [0 0 0 0] :palette 0 :kind :jelly}}
+                               :legend {\. :x} :rows (vec (repeat 15 "................"))}))))
+
+(deftest kinds-from-text
+  (let [s (screen/from-tiles {:grid (vec (repeat 960 0))
+                              :block-palettes (vec (repeat 240 0))
+                              :solid (assoc (vec (repeat 15 "................")) 3 "#.=.H...........")
+                              :kinds {\# :solid \= :one-way \H :ladder}})]
+    (is (= [1 0 2 0 4] (subvec (:solid s) 48 53))))
+  (testing "by default only # is solid"
+    (let [s (screen/from-tiles {:grid (vec (repeat 960 0))
+                                :block-palettes (vec (repeat 240 0))
+                                :solid (assoc (vec (repeat 15 "................")) 3 "#.=.H...........")})]
+      (is (= [1 0 0 0 0] (subvec (:solid s) 48 53))))))
+
+(deftest songs
+  (is (= 440.0 (sound/note-hz :a4)))
+  (is (= 880.0 (sound/note-hz :a5)))
+  (is (< 261 (sound/note-hz :c4) 262) "middle C")
+  (is (= (sound/note-hz :cs4) (sound/note-hz :db4)) "sharps and flats")
+  (is (= 126 (sound/triangle-period 440)) "an octave below a pulse channel's timer for the same pitch")
+  (is (= [10 126 0, 5 0 0xFF, 0] (sound/song [[:a4 10] [:rest 5]])) "frames, low, high; a rest; the end")
+  (is (thrown? #?(:clj Exception :cljs js/Error) (sound/note-hz :h2)))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (sound/song [[:a4 0]])))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (sound/song []))))

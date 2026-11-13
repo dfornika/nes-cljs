@@ -155,6 +155,30 @@ try {
     });
   }
 
+  await step('Star Tower plays', async () => {
+    // Ladders: walk to one, hold Up, and the player is climbing.
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Star Tower")');
+    await page.waitForSelector('.rom-name:has-text("tower")');
+    await page.click('button:text-is("Lens")');
+    const row = name => page.locator('tr', {has: page.locator(`td:text-is("${name}")`)});
+    const state = () => row('rt.state').locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
+    await page.keyboard.down('Enter');
+    await until(async () => (await state()).includes('playing'));
+    await page.keyboard.up('Enter');
+    // The player starts two blocks left of a ladder. Run right holding Up
+    // too, as a player would: it gets on as it reaches the ladder. (Letting
+    // go of Right first could slide past it: the player slows down, it
+    // doesn't stop dead.)
+    await page.keyboard.down('ArrowRight');
+    await page.keyboard.down('ArrowUp');
+    await until(() => row('player.climbing').locator('input').isChecked());
+    await page.keyboard.up('ArrowUp');
+    await page.keyboard.up('ArrowRight');
+    check(true, 'Star Tower: Up at a ladder climbs it');
+  });
+
   await step('Alienscape draws', async () => {
     // A room from an art pack (PNG files turned into tiles when the art was
     // imported): a lot more colors on screen than the hand-drawn games.

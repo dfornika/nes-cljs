@@ -287,15 +287,28 @@ move to its own repository once its API settles. Games are in
   screens), its animated tiles (the liquid, the doors: needs CHR RAM or bank switching), the
   leech; reading what's solid from the art (most solid blocks look alike); an "import a PNG"
   button in the page
-- [ ] **Engine, part two** – scrolling (a camera, and drawing new columns as they come into
-  view) and levels wider than a screen; music (a note every few frames, from a table); a
-  second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move; ladders
-  and one-way platforms (more kinds of block than "solid"); enemies that fall and land
-  (`move-body` for objects in a pool)
-- [ ] **Engine follow-ups** – acceleration and friction for the player; variable jump height
-  (let go of A early); objects with more than one byte of position; animation as data
-  (frames and timings in a table) rather than code; the 8-sprites-per-line limit: rotate the
-  order objects are drawn in so they flicker, not vanish
+- [x] **Engine, part two** – `games.tower`, Star Tower, and what it needed:
+  - **Kinds of block** – `:kind :solid / :one-way / :ladder` on a metatile; a ladder's top is
+    worked out when the ROM is built (`screen/kind-bytes`) and is both climbable and stood on;
+    `rt/on-kinds` tests what `probe` found
+  - **One-way platforms and ladders** in `gamedev-toolkit.platformer`: `move-body` lands on a
+    one-way platform only from above; `ladders` climbs with Up and Down
+  - **Feel** – `platformer/speed-up` and `slow-down` (acceleration and friction), `cut-jump`
+    (let go of A to cut a jump short)
+  - **Music** – `sound/song` (notes by name, in frames), played on the triangle channel by
+    the runtime (`:songs`, `rt/play-song`, `rt/stop-music`)
+  - **Enemies that fall** – a walker with `:falls? true` walks off edges and drops
+  - **Flicker instead of vanishing** – `objects/each-rotating` draws objects in a different
+    order each frame
+  - `games.platform-kit` takes all of these as options; Star Hopper and Alienscape are unchanged
+- [ ] **Engine, part three** – scrolling (a camera, and drawing new columns as they come into
+  view) and levels wider than a screen, which needs objects with more than one byte of
+  position; a second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move
+  (and carry the player)
+- [ ] **Engine follow-ups** – animation as data (frames and timings in a table) rather than
+  code; a second voice for the music (on a pulse channel, giving way to sound effects);
+  `move-body` for objects in a pool, so enemies can jump; the player climbing onto a ladder
+  from beside it without lining up exactly
 - [ ] **In-browser editor** – SCI (already a dependency) to write and run the
   assembler from the page
 - [ ] **A small language** of expressions and typed variables that compiles to generators

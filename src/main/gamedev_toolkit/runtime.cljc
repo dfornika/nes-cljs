@@ -58,7 +58,9 @@
     (call random)             a random byte in A
     (sprite ...) (metasprite ...) (queue ...) (draw-screen ...)
     (background :title)       inside draw-screen: a whole screen from :screens
-    (probe x dx y dy)         is the background solid there? (see `solid-at`)
+    (probe x dx y dy)         what kind of block is there? (see `solid-at`)
+    (on-kinds [:solid] ...)   ...and if it's one of these, do something
+    (play-song :theme)        music, from :songs; (stop-music)
 
   More of an engine is built on this: gamedev-toolkit.objects (a pool of
   things that come and go), gamedev-toolkit.platformer (gravity, jumping,
@@ -71,6 +73,7 @@
             [gamedev-toolkit.memory :as memory]
             [gamedev-toolkit.rom :as rom]
             [gamedev-toolkit.screen :as screen]
+            [gamedev-toolkit.sound :as sound]
             [gamedev-toolkit.sub :as sub :refer [call]]))
 
 ;; ---------------------------------------------------------------------------
@@ -334,6 +337,28 @@
     [:tay]
     [:lda [:ind :rt/map] :y]]))
 
+(defn on-kinds
+  "After `probe` (or `solid-at`), with the kind of block in A: run `then`
+  if it's one of `kinds` (:empty :solid :one-way :ladder :ladder-top: see
+  gamedev-toolkit.screen/kinds), otherwise `else`."
+  ([kinds then] (on-kinds kinds then nil))
+  ([kinds then else]
+   (let [yes (asm/genlabel "kind")
+         done (asm/genlabel "kinded")]
+     [(for [k kinds]
+        [[:cmp [:imm (or (screen/kinds k)
+                         (throw (ex-info (str "Unknown kind of block " (pr-str k)) {:kind k})))]]
+         [:beq yes]])
+      else
+      [:jmp done]
+      [:label yes]
+      then
+      [:label done]])))
+
+(def landable
+  "The kinds of block that something falling lands on."
+  [:solid :one-way :ladder-top])
+
 (defn probe
   "Ask `solid-at` about the pixel `dx` right and `dy` down from the point
   x, y (`src` operands, one byte each). The flags answer, as for
@@ -409,6 +434,8 @@
          :map       :u16                 ; the current screen's map of what's solid
          :temp      :u8                  ; scratch, for the runtime's own routines
          :slot      :u8                  ; the object being looked at (see gamedev-toolkit.objects)
+         :turn      :u8                  ; which object is drawn first this frame (see objects/each-rotating)
+         :temp2     :u8                  ; more scratch
          :old       :u16}]               ; a position to go back to (see gamedev-toolkit.platformer)
    [:pad {:held     [:bits hw/button-bits]
           :pressed  [:bits hw/button-bits]
@@ -473,9 +500,76 @@
           [:jmp done])])
      [:label done]]))
 
-(defn- main-loop [exits enters updates]
+;; ---------------------------------------------------------------------------
+;; Music
+;;
+;; A song (gamedev-toolkit.sound/song) is a table of notes in the ROM. Each
+;; frame the player counts down the current note's frames; at 0 it reads
+;; the next note and gives it to the triangle channel, which then plays it
+;; by itself until told otherwise.
+
+(def ^:private music-step
+  (sub/sub
+   :music-step
+   "Play the song, if there is one: count down this note, and at its end
+  start the next. Uses A and Y."
+   (let [done (asm/genlabel "played")
+         again (asm/genlabel "next-note")
+         rest (asm/genlabel "rest")]
+     [[:lda :music/on]
+      [:beq done]
+      [:dec :music/wait]
+      [:bne done]
+      [:label again]
+      [:ldy [:imm 0]]
+      [:lda [:ind :music/at] :y]           ; how long
+      (gen/when-flag :zero                 ; the end: back to the start
+        (gen/move16 :music/at :music/start)
+        [:jmp again])
+      [:sta :music/wait]
+      [:iny]
+      [:lda [:ind :music/at] :y]           ; the timer's low byte
+      [:sta :rt/temp]
+      [:iny]
+      [:lda [:ind :music/at] :y]           ; its high byte, or $FF for a rest
+      [:cmp [:imm 0xFF]]
+      [:beq rest]
+      [:tay]
+      ;; $4008: keep sounding until told otherwise (bit 7, and the most
+      ;; it can count); then the pitch. Writing $400B starts the note.
+      [:lda [:imm 0xFF]] [:sta :triangle]
+      [:lda :rt/temp] [:sta [:+ :triangle 2]]
+      [:sty [:+ :triangle 3]]
+      (gen/add16 :music/at [:imm 3])
+      [:jmp done]
+      [:label rest]
+      ;; silence: a count of 0, which takes effect on the write to $400B
+      [:lda [:imm 0x80]] [:sta :triangle]
+      [:lda [:imm 0]] [:sta [:+ :triangle 3]]
+      (gen/add16 :music/at [:imm 3])
+      [:label done]])))
+
+(defn play-song
+  "Start the song called `name` (one of the game's :songs), from its
+  beginning. It repeats until `stop-music`. Uses A."
+  [name]
+  (let [label (keyword "song" (clojure.core/name name))]
+    [(gen/move16 :music/at [:imm label])
+     (gen/move16 :music/start [:imm label])
+     (gen/move :music/wait [:imm 1])
+     (gen/move :music/on [:imm 1])]))
+
+(defn stop-music
+  "Stop the song, and silence the triangle channel. Uses A."
+  []
+  [(gen/move :music/on [:imm 0])
+   [:lda [:imm 0x80]] [:sta :triangle]
+   [:lda [:imm 0]] [:sta [:+ :triangle 3]]])
+
+(defn- main-loop [exits enters updates music?]
   [[:label :main]
    (call read-pad)
+   (when music? (call music-step))
 
    ;; a transition was asked for: leave one state, arrive in the other
    [:lda :rt/next]
@@ -555,12 +649,14 @@
     :screens    {name screen}: backgrounds (see gamedev-toolkit.screen), drawn
                 with (background name) inside draw-screen
     :tables     {label bytes}: other data to put in the ROM, each under its label
+    :songs      {name notes}: tunes (see gamedev-toolkit.sound/song), started
+                with (play-song name) and stopped with (stop-music)
     :overlays   [{:name :doc :draw (fn [variables] shapes)} ...]: things for a
                 debugger to draw over the picture, from the game's variables
                 (NES.cljs: see nes.overlay). Passed through as they are
 
   Returns what rom/nrom returns, with :name."
-  [{:keys [name states initial variables tiles palettes screens tables overlays]}]
+  [{:keys [name states initial variables tiles palettes screens tables songs overlays]}]
   (let [states (vec states)
         state-names (mapv first states)
         _ (when-not (some #{initial} state-names)
@@ -575,7 +671,8 @@
                     (main-loop (when (some #(:exit (second %)) states)   ; most games have none
                                  (map #(state-sub :exit %) states))
                                (map #(state-sub :enter %) states)
-                               (map #(state-sub :update %) states))
+                               (map #(state-sub :update %) states)
+                               (seq songs))
                     nmi
                     irq
                     [:label :palettes]
@@ -588,12 +685,18 @@
                        [:label (keyword "solid" (clojure.core/name screen-name))]
                        [:db (:solid s) (repeat 16 1)]])
                     (for [[label bytes] tables]
-                      [[:label label] [:db bytes]])]
+                      [[:label label] [:db bytes]])
+                    (for [[song-name notes] songs]
+                      [[:label (keyword "song" (clojure.core/name song-name))]
+                       [:db (sound/song notes)]])]
              :vectors {:nmi :nmi :reset :reset :irq :irq}
              :symbols (merge hw/registers
                              (into {} (map-indexed (fn [i n] [(keyword "state" (clojure.core/name n)) i])
                                                    state-names)))
-             :memory (memory/allocate (concat (runtime-variables state-names) variables))
+             :memory (memory/allocate (concat (runtime-variables state-names)
+                                               (when (seq songs)
+                                                 [[:music {:at :u16 :start :u16 :wait :u8 :on :bool}]])
+                                               variables))
              :chr (chr/bank tiles)})
            :name name
            :overlays overlays)))

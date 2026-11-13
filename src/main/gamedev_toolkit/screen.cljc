@@ -24,6 +24,32 @@
   gamedev-toolkit.runtime unpacks it straight into video memory."
   (:require [gamedev-toolkit.font :as font]))
 
+(def kinds
+  "What a block is like to bump into, as the numbers in a screen's :solid
+  map. :ladder-top isn't drawn: it's worked out (see `kind-bytes`)."
+  {:empty 0 :solid 1 :one-way 2 :ladder 3 :ladder-top 4})
+
+(defn- kind-of [m]
+  (let [k (cond (:kind m) (:kind m) (:solid? m) :solid :else :empty)]
+    (when-not (contains? kinds k)
+      (throw (ex-info (str "Unknown kind of block " (pr-str k) ". There are: " (sort (keys (dissoc kinds :ladder-top)))) {:kind k})))
+    k))
+
+(defn kind-bytes
+  "A grid of kinds (rows of keywords) as the bytes of a :solid map.
+
+  A ladder whose block above isn't ladder is the ladder's top, and becomes
+  :ladder-top: climbable, and also a one-way platform, so that whoever
+  climbs to the top can step off and stand there. That's worked out here,
+  when the ROM is built, so the game never has to look at the block above."
+  [grid]
+  (vec (for [[r row] (map-indexed vector grid)
+             [c k] (map-indexed vector row)]
+         (kinds (if (and (= k :ladder)
+                         (or (zero? r) (not= :ladder (get-in grid [(dec r) c]))))
+                  :ladder-top
+                  k)))))
+
 (def columns 16)
 (def rows 15)
 
@@ -58,10 +84,14 @@
   the metatiles with gamedev-toolkit.font, whose first tile is
   `:font-base` in the cartridge (default 0).
 
-  A metatile can also say what it's like to bump into: {:solid? true}
-  for a wall or a floor. That goes in the screen's :solid map, a byte for
-  each metatile (1 for solid), which gamedev-toolkit.runtime's `solid-at`
-  looks things up in.
+  A metatile can also say what it's like to bump into, its *kind*:
+
+    {:kind :solid}      a wall or a floor (or {:solid? true})
+    {:kind :one-way}    a platform you can jump up through and land on
+    {:kind :ladder}     climbable; not solid
+
+  That goes in the screen's :solid map, a byte for each metatile (see
+  `kinds`), which gamedev-toolkit.runtime's `solid-at` looks things up in.
 
   Returns {:tiles [960 tile numbers, row by row] :attributes [64 bytes]
   :solid [240 bytes, a row of 16 at a time]}."
@@ -86,7 +116,7 @@
         tiles (write-text tiles text font-base)]
     {:tiles tiles
      :attributes (attributes (fn [col row] (get-in grid [row col :palette] 0)))
-     :solid (vec (for [row grid, m row] (if (:solid? m) 1 0)))}))
+     :solid (kind-bytes (mapv #(mapv kind-of %) grid))}))
 
 (defn from-tiles
   "A screen from art that's already tiles (a picture turned into tiles by
@@ -96,12 +126,14 @@
     :tile-base       where those tiles start in the cartridge (default 0)
     :block-palettes  240 palette numbers, one per 16x16 block
     :solid           what's solid, drawn as for `screen`: 15 rows of 16
-                     characters, where a character in `:solid-characters`
-                     (default just #) is a solid block
+                     characters, one per block
+    :kinds           which characters are which kind of block, e.g.
+                     {# :solid, = :one-way, H :ladder} (as character
+                     literals); others are empty. Default: just # is solid
     :text            as for `screen`; the blocks it covers get palette
                      `:text-palette` (default 0)"
-  [{:keys [grid tile-base block-palettes solid solid-characters text text-palette font-base]
-    :or {tile-base 0 solid-characters #{\#} text-palette 0 font-base 0}}]
+  [{:keys [grid tile-base block-palettes solid kinds text text-palette font-base]
+    :or {tile-base 0 kinds {\# :solid} text-palette 0 font-base 0}}]
   (when-not (and (= 960 (count grid)) (= 240 (count block-palettes)))
     (throw (ex-info "A screen is 960 tiles and 240 block palettes" {})))
   (when-not (and (= rows (count solid)) (every? #(= columns (count %)) solid))
@@ -113,7 +145,7 @@
                                (if (lettered [col row])
                                  text-palette
                                  (nth block-palettes (+ (* 16 row) col) 0))))
-     :solid (vec (for [line solid, ch line] (if (solid-characters ch) 1 0)))}))
+     :solid (kind-bytes (mapv (fn [line] (mapv #(kind-of {:kind (get kinds % :empty)}) line)) solid))}))
 
 (defn nametable
   "A screen as the 1024 bytes of video memory it fills: tiles, then

@@ -11,14 +11,23 @@
 
   What's here is ordinary game code built on the engine:
 
-    gravity, jumping, landing    gamedev-toolkit.platformer
+    gravity, jumping, landing,
+      one-way platforms          gamedev-toolkit.platformer
+    ladders                      platformer/ladders (with :climb-speed)
+    speeding up and slowing
+      down, and jumps as high
+      as A is held               :accel / :friction, :short-jump
     pickups and walkers          gamedev-toolkit.objects: a pool of slots
-    sound effects                gamedev-toolkit.sound
+    walkers that fall            :falls? on the walker
+    sound effects and music      gamedev-toolkit.sound (and :song)
     a player that faces both
       ways and walks, and
-      creatures that animate     sprites-flipped, rt/animated"
+      creatures that animate     sprites-flipped, rt/animated
+    flicker, not vanishing,
+      when crowded               objects/each-rotating"
   (:require [gamedev-toolkit.asm :as asm]
             [gamedev-toolkit.font :as font]
+            [gamedev-toolkit.hardware :as hw]
             [gamedev-toolkit.gen :as gen]
             [gamedev-toolkit.objects :as objects]
             [gamedev-toolkit.platformer :as platformer]
@@ -30,11 +39,12 @@
 (def things
   "The pool of pickups and walkers. :dir is which way a walker is
   walking: 0 right, 1 left."
-  (objects/pool :thing 8 [:pickup :walker] {:x :u8 :y :u8 :dir :u8}))
+  (objects/pool :thing 12 [:pickup :walker] {:x :u8 :y :u8 :dir :u8}))
 
 (def variables
   [[:player {:x :u8.8, :y :u8.8, :vx :s8.8, :vy :s8.8
              :on-ground :bool
+             :climbing  :bool
              :facing    [:enum {0 :right 1 :left}]}]
    [:pickups-left :u8]
    [:score [:array 3 :u8] {:doc "Three decimal digits, hundreds first"}]
@@ -61,10 +71,11 @@
 
 (defn- body-of
   "The player as gamedev-toolkit.platformer wants a body described."
-  [{:keys [gravity max-fall box]}]
+  [{:keys [gravity max-fall box climb-speed]}]
   (merge {:x :player/x :y :player/y :vx :player/vx :vy :player/vy
           :on-ground :player/on-ground
           :gravity gravity :max-fall max-fall}
+         (when climb-speed {:climbing :player/climbing})
          box))
 
 (defn- frames
@@ -100,9 +111,23 @@
     :touching    how close, in pixels, counts as touching (default 12)
     :sounds      {:jump :pickup :hit} (default: `default-sounds`)
 
+  and, if wanted:
+
+    :accel :friction   speeding up and slowing down, in pixels a frame per
+                       frame (without them, the player runs at full speed
+                       at once and stops dead)
+    :short-jump        let go of A while rising and the rise slows to this
+                       many pixels a frame: tap for a hop, hold for a jump
+    :climb-speed       ladders (a whole number of pixels a frame)
+    :song              a tune for while playing (see gamedev-toolkit.sound/song)
+
+  A walker with :falls? true walks off edges and falls (2 pixels a
+  frame, landing on anything it can stand on) instead of turning round.
+
   Returns what gamedev-toolkit.runtime/program returns."
   [{:keys [name tiles palettes screens start placed player pickup walker score-at
-           run-speed jump-speed touching sounds title-sprite]
+           run-speed jump-speed touching sounds title-sprite
+           accel friction short-jump climb-speed song]
     :or {touching 12 sounds default-sounds}
     :as game}]
   (let [body (body-of game)
@@ -119,6 +144,7 @@
           (gen/move16 :player/vx [:imm 0])
           (gen/move16 :player/vy [:imm 0])
           (gen/move :player/facing [:imm 0])
+          (gen/move :player/climbing [:imm 0])
           (gen/move :pickups-left [:imm (count (filter #(= :pickup (first %)) placed))])
           (objects/clear things)
           (objects/spawn-all things :placed)])
@@ -126,18 +152,38 @@
         move-player
         (sub/sub
          :move-player
-         "Left and Right set the sideways speed (there's no skidding: letting go
-  stops at once), A jumps, and platformer/move-body does the rest."
-         [(gen/move16 :player/vx [:imm 0])
-          (rt/when-held :right
-            (gen/move16 :player/vx [:imm (gen/fixed run-speed)])
-            (gen/move :player/facing [:imm 0]))
-          (rt/when-held :left
-            (gen/move16 :player/vx [:imm (gen/fixed (- run-speed))])
-            (gen/move :player/facing [:imm 1]))
+         "Left and Right set the sideways speed, A jumps, and
+  platformer/move-body does the rest."
+         [(if accel
+            ;; speed builds up, and runs down when neither is held
+            [(rt/when-held :right
+               (platformer/speed-up :player/vx accel run-speed)
+               (gen/move :player/facing [:imm 0]))
+             (rt/when-held :left
+               (platformer/speed-up :player/vx (- accel) (- run-speed))
+               (gen/move :player/facing [:imm 1]))
+             [:lda :pad/held]
+             [:and [:imm (bit-or (hw/buttons :left) (hw/buttons :right))]]
+             (gen/when-flag :zero
+               (platformer/slow-down :player/vx friction))]
+            ;; full speed at once, and letting go stops dead
+            [(gen/move16 :player/vx [:imm 0])
+             (rt/when-held :right
+               (gen/move16 :player/vx [:imm (gen/fixed run-speed)])
+               (gen/move :player/facing [:imm 0]))
+             (rt/when-held :left
+               (gen/move16 :player/vx [:imm (gen/fixed (- run-speed))])
+               (gen/move :player/facing [:imm 1]))])
+          (when climb-speed
+            (platformer/ladders body climb-speed))
           (rt/when-pressed :a
             (platformer/jump body jump-speed
               (sound/play (:jump sounds))))
+          (when short-jump
+            [[:lda :pad/held]
+             [:and [:imm (hw/buttons :a)]]
+             (gen/when-flag :zero
+               (platformer/cut-jump body short-jump))])
           (platformer/move-body body)])
 
         collect
@@ -154,37 +200,45 @@
             (call start-level))])
 
         ;; Inside `each`, for a walker: turn it round (to face `new-dir`) if
-        ;; there's a wall `ahead` pixels along from its left edge, or no
-        ;; floor under that point.
+        ;; there's a wall `ahead` pixels along from its left edge, or (for
+        ;; walkers that don't fall) no floor under that point.
         turn-if
         (fn [ahead new-dir]
-          (let [turn (asm/genlabel "turn")
-                done (asm/genlabel "walked")]
+          (let [turn (gen/move (field :dir) [:imm new-dir])]
             [(rt/probe (field :x) ahead (field :y) 8)     ; a wall at chest height?
-             [:bne turn]
-             (objects/slot)
-             (rt/probe (field :x) ahead (field :y) 16)    ; floor to walk onto?
-             [:bne done]
-             [:label turn]
-             (objects/slot)
-             (gen/move (field :dir) [:imm new-dir])
-             [:label done]
+             (rt/on-kinds [:solid]
+               [(objects/slot) turn]
+               (when-not (:falls? walker)
+                 [(objects/slot)
+                  (rt/probe (field :x) ahead (field :y) 16)    ; floor to walk onto?
+                  (rt/on-kinds rt/landable
+                    nil
+                    [(objects/slot) turn])]))
              (objects/slot)]))
 
         walk
         (sub/sub
          :walk
          "The walker whose slot is in X takes a step, a pixel every other frame,
-  and turns round at a wall or the end of what it's standing on."
-         [[:lda :rt/frame]
-          [:and [:imm 1]]
-          (gen/when-flag :zero
-            (gen/with-operand :lda (field :dir))
-            (gen/if-flag :zero
-              [(gen/add (field :x) [:imm 1])
-               (turn-if 16 1)]
-              [(gen/subtract (field :x) [:imm 1])
-               (turn-if -1 0)]))])
+  and turns round at a wall (or the end of what it's standing on, if it
+  doesn't fall). One that falls drops 2 pixels a frame while there's
+  nothing under it: it started on a block's top, and 2 divides 16, so it
+  lands exactly on the next one down."
+         (let [step [[:lda :rt/frame]
+                     [:and [:imm 1]]
+                     (gen/when-flag :zero
+                       (gen/with-operand :lda (field :dir))
+                       (gen/if-flag :zero
+                         [(gen/add (field :x) [:imm 1])
+                          (turn-if 16 1)]
+                         [(gen/subtract (field :x) [:imm 1])
+                          (turn-if -1 0)]))]]
+           (if (:falls? walker)
+             [(rt/probe (field :x) 8 (field :y) 16)    ; under the middle of its feet
+              (rt/on-kinds rt/landable
+                [(objects/slot) step]
+                [(objects/slot) (gen/add (field :y) [:imm 2])])]
+             step)))
 
         update-things
         (sub/sub
@@ -226,7 +280,9 @@
           (gen/if-flag :zero
             (draw-player (:standing player))
             (draw-player (:striding player)))
-          (objects/each things
+          ;; a different object first each frame, so a crowded line flickers
+          ;; rather than losing some
+          (objects/each-rotating things
             (let [with-y {:with :y}
                   drawn-left? (= :left (:faces walker))
                   walker-frames (fn [flipped?] (frames tiles (:frames walker) (:palette walker) flipped?))]
@@ -250,6 +306,7 @@
       :palettes palettes
       :screens screens
       :tables {:placed (objects/placements things placed)}
+      :songs (when song {:theme song})
       :initial :title
       :states
       [[:title
@@ -262,12 +319,14 @@
        [:playing
         {:enter [(rt/draw-screen (rt/background :level))
                  (gen/fill :score 3 [:imm 0])
-                 (call start-level)]
+                 (call start-level)
+                 (when song (rt/play-song :theme))]
          :update [(call move-player)
                   (call update-things)
                   (call draw-everything)]}]
        [:game-over
-        {:enter [(rt/draw-screen
+        {:enter [(when song (rt/stop-music))
+                 (rt/draw-screen
                    (rt/background :game-over)
                    ;; the score comes from memory, so its digits are written here
                    (let [[col row] (:game-over score-at)] (rt/at col row))
@@ -279,18 +338,28 @@
       ;; thinks things are.
       :overlays
       [{:name "Physics"
-        :doc "The solid blocks, the player's body (green when standing on something) and its speed, and each object's slot number."
+        :doc "The blocks (solid gray, one-way platforms a cyan line, ladders blue), the player's body (green when standing on something, blue when climbing) and its speed, and each object's slot number."
         ;; (a struct with this many fields comes as one value per field: :player.x ...)
         :draw (fn [{state :rt.state xs :thing.x ys :thing.y types :thing.type
-                    x :player.x y :player.y vx :player.vx vy :player.vy on-ground :player.on-ground}]
+                    x :player.x y :player.y vx :player.vx vy :player.vy on-ground :player.on-ground
+                    climbing :player.climbing}]
                 (when (= state :playing)
                   (let [{:keys [left right top height]} body]
                     (concat
-                     (for [i (range (count solid)) :when (pos? (nth solid i))]
-                       [:rect {:x (* 16 (mod i 16)) :y (* 16 (quot i 16)) :w 16 :h 16 :color :gray}])
+                     (for [i (range (count solid))
+                           :let [kind (nth solid i)
+                                 bx (* 16 (mod i 16)) by (* 16 (quot i 16))]
+                           shape (case kind
+                                   1 [[:rect {:x bx :y by :w 16 :h 16 :color :gray}]]
+                                   2 [[:line {:x1 bx :y1 by :x2 (+ bx 16) :y2 by :color :cyan}]]
+                                   3 [[:rect {:x (+ bx 3) :y by :w 10 :h 16 :color :blue}]]
+                                   4 [[:rect {:x (+ bx 3) :y by :w 10 :h 16 :color :blue}]
+                                      [:line {:x1 bx :y1 by :x2 (+ bx 16) :y2 by :color :cyan}]]
+                                   nil)]
+                       shape)
                      ;; (+ 1: the PPU draws a sprite one line below the Y it's given)
                      [[:rect {:x (+ x left) :y (+ y top 1) :w (inc (- right left)) :h (- height top)
-                              :color (if on-ground :lime :yellow)}]
+                              :color (cond climbing :blue on-ground :lime :else :yellow)}]
                       [:line {:x1 (+ x 8) :y1 (+ y 9) :x2 (+ x 8 (* 8 vx)) :y2 (+ y 9 (* 8 vy))
                               :color :yellow :arrow? true}]]
                      (for [[slot t] (map-indexed vector types)

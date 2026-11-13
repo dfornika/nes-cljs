@@ -120,6 +120,32 @@
      [:inx]
      [:cpx [:imm (:size pool)]])])
 
+(defn each-rotating
+  "Like `each`, but starting from a different object each frame, and going
+  round. For drawing: the PPU shows only 8 sprites on a line, and drops
+  the ones that came last in its list. Drawing the objects in a different
+  order each frame makes them take turns, so crowded objects flicker
+  instead of some vanishing. (Uses :rt/turn, which this moves on.)"
+  [pool & body]
+  (let [done (asm/genlabel "rotated")]
+    [;; start one further along than last frame
+     [:inc :rt/turn]
+     [:lda :rt/turn]
+     [:cmp [:imm (:size pool)]]
+     (gen/when-flag :carry (gen/move :rt/turn [:imm 0]))
+     [:ldx :rt/turn]
+     (gen/forever
+       [:stx :rt/slot]
+       [:lda (table pool :type) :x]
+       (gen/when-flag :not-zero body)
+       [:ldx :rt/slot]
+       [:inx]
+       [:cpx [:imm (:size pool)]]
+       (gen/when-flag :equal [:ldx [:imm 0]])
+       [:cpx :rt/turn]
+       [:beq done])
+     [:label done]]))
+
 (defn by-type
   "Inside `each`: run the code for the current object's type. `cases` is
   {type forms}; types left out do nothing."

@@ -29,12 +29,18 @@
             [games.hello :as hello]
             [games.hopper :as hopper]
             [games.ladder :as ladder]
+            [games.tower :as tower]
             [nes.touchpad :as touchpad]
             [nes.ui :as ui]
             [nes.workbench :as workbench]))
 
 (def sample-roms
-  [{:name "Alienscape"
+  [{:name "Star Tower"
+    :build tower/build
+    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/tower.cljc"
+    :blurb "Star Hopper climbs: ladders, planks to jump up through, spikes that fall, and a tune. Start to play, Left and Right to run, A to jump (hold for higher), Up and Down on ladders."
+    :credit "written in ClojureScript, for NES.cljs"}
+   {:name "Alienscape"
     :build alienscape/build
     :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/alienscape.cljc"
     :blurb "Star Hopper's rules in a room from Hexany's Alienscape: collect the orbs, mind the biters. Start to play, Left and Right to run, A to jump (high)."
