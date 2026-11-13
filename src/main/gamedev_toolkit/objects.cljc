@@ -53,6 +53,17 @@
   [pool k]
   (gen/indexed (table pool k) :x))
 
+(defn field16
+  "A 16-bit field of the object whose slot is in X, kept as two one-byte
+  fields: `k` for its low byte and `k`-hi for its high byte (declare both:
+  {:x :u8 :x-hi :u8}). As a gen/pair, for the 16-bit generators: a
+  position on a level wider than the screen."
+  [pool k]
+  (gen/pair (field pool k) (field pool (keyword (str (name k) "-hi")))))
+
+(defn- wide-x? [pool]
+  (boolean (some #{:x-hi} (:fields pool))))
+
 (defn type-id
   "The number that stands for type `t` in the pool's :type field."
   [pool t]
@@ -164,14 +175,22 @@
 
 (defn placements
   "The bytes of a table of objects to spawn: `objects` is [[type x y]
-  ...]. Three bytes each (type number, x, y), then a 0."
+  ...]. Three bytes each (type number, x, y), then a 0; or for a pool
+  with an :x-hi field (for levels wider than the screen), four: type, x's
+  low byte, x's high byte, y."
   [pool objects]
-  (conj (vec (mapcat (fn [[t x y]] [(type-id pool t) x y]) objects)) 0))
+  (conj (vec (mapcat (fn [[t x y]]
+                       (if (wide-x? pool)
+                         [(type-id pool t) (bit-and x 0xFF) (bit-shift-right x 8) y]
+                         [(type-id pool t) x y]))
+                     objects))
+        0))
 
 (defn spawn-all
   "Spawn every object in the table at `label` (see `placements`: at most
-  85 of them), setting its :type, :x and :y; other fields are left as
-  they were, so `clear` the pool first. Uses A, X and Y."
+  85 of them, or 63 with 16-bit x), setting its :type, :x (and :x-hi)
+  and :y; other fields are left as they were, so `clear` the pool first.
+  Uses A, X and Y."
   [pool label]
   (let [done (asm/genlabel "spawned")]
     [[:ldy [:imm 0]]
@@ -185,6 +204,9 @@
        [:iny]
        [:lda label :y] [:sta (table pool :x) :x]
        [:iny]
+       (when (wide-x? pool)
+         [[:lda label :y] [:sta (table pool :x-hi) :x]
+          [:iny]])
        [:lda label :y] [:sta (table pool :y) :x]
        [:iny])
      [:label done]]))

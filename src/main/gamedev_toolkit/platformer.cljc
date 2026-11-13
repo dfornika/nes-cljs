@@ -32,11 +32,25 @@
   as a block and could straddle two.
 
   The code is generated for one body at a time: (move-body {...}) returns
-  the instructions for that body's variables. Needs
-  gamedev-toolkit.runtime."
+  the instructions for that body's variables. Its x can be 8.8 fixed point
+  (a position on a screen) or, with :wide? true, 16.8 (:u16.8: a position
+  on a level up to 65,535 pixels wide). Needs gamedev-toolkit.runtime."
   (:require [gamedev-toolkit.asm :as asm]
             [gamedev-toolkit.gen :as gen]
             [gamedev-toolkit.runtime :as rt]))
+
+(defn- x-whole
+  "The body's x in whole pixels: one byte, or a 16-bit pair if it's wide."
+  [{:keys [x wide?]}]
+  (if wide? (gen/whole16 x) (gen/whole x)))
+
+(defn- save-x [{:keys [x wide?]}]
+  [(gen/move16 :rt/old x)
+   (when wide? (gen/move [:+ :rt/old 2] [:+ x 2]))])
+
+(defn- restore-x [{:keys [x wide?]}]
+  [(gen/move16 x :rt/old)
+   (when wide? (gen/move [:+ x 2] [:+ :rt/old 2]))])
 
 (defn- check
   "Probe each [dx dy] of `points` from x, y; as soon as one's kind passes
@@ -85,7 +99,7 @@
   "The instructions to move a body one frame (see the namespace
   docstring). Its variables:
 
-    :x :y            its top left corner, 8.8 fixed point
+    :x :y            its top left corner, 8.8 fixed point (x 16.8 if :wide?)
     :vx :vy          its speed, signed 8.8 fixed point, in pixels a frame
     :on-ground       set to 1 when it's standing on something, else 0
     :climbing        (optional) 1 while it's on a ladder: no gravity, and
@@ -101,8 +115,8 @@
                      it could pass through a block in one frame)
 
   Uses A, X and Y, :rt/old and :rt/temp2."
-  [{:keys [x y vx vy on-ground climbing left right top height gravity max-fall]}]
-  (let [wx (gen/whole x)
+  [{:keys [x y vx vy on-ground climbing left right top height gravity max-fall wide?] :as body}]
+  (let [wx (x-whole body)
         wy (gen/whole y)
         side (fn [dx] [[dx (inc top)] [dx (dec height)]])
         head [[(inc left) top] [(dec right) top]]
@@ -114,15 +128,15 @@
                         (gen/when-flag :carry             ; ...too fast
                           (gen/move16 vy [:imm (gen/fixed max-fall)])))]]
     [;; --- sideways
-     (gen/move16 :rt/old x)
-     (gen/add16 x vx)
+     (save-x body)
+     (if wide? (gen/add-wide x vx) (gen/add16 x vx))
      [:lda (gen/hi vx)]
      [:ora (gen/lo vx)]
      (gen/when-flag :not-zero            ; it's moving sideways at all
        [:lda (gen/hi vx)]
        (gen/if-flag :negative
-         (check wx wy (side left) solid (gen/move16 x :rt/old) nil)
-         (check wx wy (side right) solid (gen/move16 x :rt/old) nil)))
+         (check wx wy (side left) solid (restore-x body) nil)
+         (check wx wy (side right) solid (restore-x body) nil)))
 
      ;; --- gravity (not on a ladder)
      (if climbing
@@ -210,13 +224,19 @@
 (defn- start-climbing
   "Get on the ladder: line up with it, and keep to whole pixels (climbing
   is a pixel at a time, so it reaches the ladder's top exactly)."
-  [{:keys [x y vx vy climbing]}]
-  [(gen/move climbing [:imm 1])
-   [:lda (gen/whole x)] [:clc] [:adc [:imm 8]] [:and [:imm 0xF0]] [:sta (gen/whole x)]
-   (gen/move (gen/lo x) [:imm 0])
+  [{:keys [x y vx vy climbing] :as body}]
+  (let [wx (gen/wide (x-whole body))]
+    [(gen/move climbing [:imm 1])
+     ;; x = (x + 8) with the low four bits cleared: the ladder's column
+     (gen/with-operand :lda (gen/lo wx)) [:clc] [:adc [:imm 8]] [:and [:imm 0xF0]]
+     (gen/with-operand :sta (gen/lo wx))
+     (when (:wide? body)
+       [(gen/with-operand :lda (gen/hi wx)) [:adc [:imm 0]]  ; (AND leaves the carry alone)
+        (gen/with-operand :sta (gen/hi wx))])
+     (gen/move (gen/lo x) [:imm 0])
    (gen/move (gen/lo y) [:imm 0])
-   (gen/move16 vx [:imm 0])
-   (gen/move16 vy [:imm 0])])
+     (gen/move16 vx [:imm 0])
+     (gen/move16 vy [:imm 0])]))
 
 (defn ladders
   "Climbing, with Up and Down. Run it after the code that sets the body's
@@ -232,7 +252,7 @@
 
   Uses A, X and Y."
   [{:keys [x y vx vy on-ground climbing height] :as body} speed]
-  (let [wx (gen/whole x)
+  (let [wx (x-whole body)
         wy (gen/whole y)
         climbable [:ladder :ladder-top]]
     [[:lda climbing]

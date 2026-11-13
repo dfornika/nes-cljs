@@ -155,6 +155,26 @@ try {
     });
   }
 
+  await step('Star Run scrolls', async () => {
+    // Run right: the camera follows, and the picture changes as the
+    // background scrolls (the left edge of the screen shows other blocks).
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("Star Run")');
+    await page.waitForSelector('.rom-name:has-text("star-run")');
+    await page.click('button:text-is("Lens")');
+    const row = name => page.locator('tr', {has: page.locator(`td:text-is("${name}")`)});
+    const state = () => row('rt.state').locator('select').inputValue();
+    await until(async () => (await state()).includes('title'));
+    await page.keyboard.down('Enter');
+    await until(async () => (await state()).includes('playing'));
+    await page.keyboard.up('Enter');
+    const camera = async () => parseInt((await row('camera').locator('td').nth(2).textContent()).match(/\d+/)[0]);
+    await page.keyboard.down('ArrowRight');
+    const moved = await until(async () => { const c = await camera(); return c > 40 && c; });
+    await page.keyboard.up('ArrowRight');
+    check(true, `Star Run: running right moves the camera (x ${moved})`);
+  });
+
   await step('Star Tower plays', async () => {
     // Ladders: walk to one, hold Up, and the player is climbing.
     await page.click('button:text-is("Sample ROMs ▾")');

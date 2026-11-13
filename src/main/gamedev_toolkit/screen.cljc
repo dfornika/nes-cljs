@@ -168,3 +168,92 @@
   [packed]
   (vec (mapcat (fn [[n value]] (repeat n value))
                (take-while #(pos? (first %)) (partition 2 packed)))))
+
+;; ---------------------------------------------------------------------------
+;; What's solid, as the game looks it up
+;;
+;; The runtime's `solid-at` finds a block's kind by its column and row. With
+;; the kinds stored a column at a time, 16 to a column (the 15 rows, then
+;; one more that's solid, so nothing falls out of the bottom), the byte for
+;; pixel x, y is at (x / 16) * 16 + y / 16. And (x / 16) * 16 is just x with
+;; its low four bits cleared, so there's no multiplying, for a screen or for
+;; a level 4,000 pixels wide.
+
+(defn kind-columns
+  "A :solid map (rows of 16 kinds, as `screen` and `from-tiles` make it,
+  or rows of any width) as the runtime stores it: column by column, 16
+  bytes each, the last solid."
+  ([solid] (kind-columns solid columns))
+  ([solid width]
+   (vec (for [c (range width)
+              r (range 16)]
+          (if (< r rows) (nth solid (+ (* r width) c)) 1)))))
+
+;; ---------------------------------------------------------------------------
+;; Levels wider than the screen
+;;
+;; A screen is drawn all at once. A level that scrolls is drawn a column of
+;; blocks at a time, as each comes into view (see gamedev-toolkit.runtime's
+;; `level`), so it's stored in the pieces that needs, all worked out here:
+;;
+;;   :ids         which metatile is where, a column at a time (16 a column)
+;;   :kinds       what's solid, the same way (see `kind-columns`)
+;;   :attributes  the palette bytes, 8 for each pair of columns: a byte
+;;                covers a 32x32 area, two blocks wide
+;;
+;; and the game's metatiles become four tables of tiles (top left, top
+;; right, bottom left, bottom right) and a table of palettes, indexed by a
+;; metatile's number (see `metatile-tables`).
+
+(defn metatile-order
+  "The metatiles' names in the order they're numbered: alphabetical, so
+  every level made from the same metatiles numbers them the same."
+  [metatiles]
+  (vec (sort (keys metatiles))))
+
+(defn metatile-tables
+  "The metatiles as tables indexed by their numbers: {:tl [...] :tr [...]
+  :bl [...] :br [...]} (tile numbers, `tile-base` added)."
+  ([metatiles] (metatile-tables metatiles 0))
+  ([metatiles tile-base]
+   (let [order (metatile-order metatiles)
+         corner (fn [i] (mapv #(+ tile-base (nth (:tiles (metatiles %)) i)) order))]
+     {:tl (corner 0) :tr (corner 1) :bl (corner 2) :br (corner 3)})))
+
+(defn level
+  "A level drawn as text, wider than the screen: 15 rows, each a multiple
+  of 16 characters long, at least 32 (two screens), at most 240 (15
+  screens). `:metatiles` and `:legend` as for `screen`. Returns {:columns
+  :ids :kinds :attributes :solid}; :solid is the kinds row by row, as
+  `screen` gives it (for overlays and tests)."
+  [{:keys [metatiles legend] drawn :rows}]
+  (let [width (count (first drawn))]
+    (when-not (and (= rows (count drawn)) (every? #(= width (count %)) drawn)
+                   (zero? (mod width 16)) (<= 32 width 240))
+      (throw (ex-info (str "A level is " rows " rows, all the same length: a multiple of 16 from 32 to 240. This has "
+                           (count drawn) " rows of " (vec (distinct (map count drawn))))
+                      {:rows drawn})))
+    (let [number (zipmap (metatile-order metatiles) (range))
+          grid (mapv (fn [row]
+                       (mapv (fn [ch]
+                               (let [k (or (get legend ch)
+                                           (throw (ex-info (str "The character " (pr-str ch) " isn't in the :legend") {:char ch})))]
+                                 (when-not (contains? metatiles k)
+                                   (throw (ex-info (str "The :legend says " (pr-str ch) " is " k ", which isn't one of the :metatiles") {:metatile k})))
+                                 k))
+                             row))
+                     drawn)
+          solid (kind-bytes (mapv #(mapv (fn [k] (kind-of (metatiles k))) %) grid))
+          palette-at (fn [c r] (if (< r rows) (:palette (metatiles (get-in grid [r c])) 0) 0))]
+      {:columns width
+       :ids (vec (for [c (range width), r (range 16)]
+                   (if (< r rows) (number (get-in grid [r c])) 0)))
+       :kinds (kind-columns solid width)
+       :solid solid
+       :attributes (vec (for [pair (range (quot width 2))
+                              ar (range 8)
+                              :let [c (* 2 pair), r (* 2 ar)]]
+                          (bit-or (palette-at c r)
+                                  (bit-shift-left (palette-at (inc c) r) 2)
+                                  (bit-shift-left (palette-at c (inc r)) 4)
+                                  (bit-shift-left (palette-at (inc c) (inc r)) 6))))})))

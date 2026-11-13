@@ -49,7 +49,7 @@
                     (first (reduce (fn [[out at] [k t]]
                                      [(conj out [(keyword (str (clojure.core/name name) "." (clojure.core/name k)))
                                                  (lens-spec t at)])
-                                      (+ at (if (#{:u16 :u8.8 :s8.8} t) 2 1))])
+                                      (+ at ({:u16 2 :u8.8 2 :s8.8 2 :u16.8 3} t 1))])
                                    [[] addr]
                                    (second type)))
                     [[name [:struct addr (vec (apply concat (second type)))]]])
@@ -70,7 +70,7 @@
   "[[addr name] ...] for every byte of a variable."
   [{:keys [name kind type addr size]}]
   (let [base (display-name name)
-        size-of #(if (#{:u16 :u8.8 :s8.8} %) 2 1)]
+        size-of #({:u16 2 :u8.8 2 :s8.8 2 :u16.8 3} % 1)]
     (case kind
       (:scalar :array) (byte-names base addr size)
       :struct (first (reduce (fn [[out at] [k t]]
