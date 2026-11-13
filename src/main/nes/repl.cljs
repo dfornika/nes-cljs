@@ -40,6 +40,7 @@
     (play! (hopper/build))   ; a platform game: src/main/games/hopper.cljc
     (play! (alienscape/build))   ; the same rules, with art from a CC0 pack
     (play! (tower/build))    ; ladders, one-way platforms, music
+    (play! (star-run/build)) ; a level wider than the screen
     (save! (catch/build))    ; ...downloaded as a .nes file
     (save-edn!)              ; the loaded game's program, as EDN text you can read
     (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}      ; draw over the picture, from memory
@@ -60,6 +61,7 @@
             [games.hello :as hello]
             [games.hopper :as hopper]
             [games.ladder :as ladder]
+            [games.star-run :as star-run]
             [games.tower :as tower]
             [nes.console :as console]
             [nes.breakpoints :as bp]

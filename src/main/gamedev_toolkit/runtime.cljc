@@ -124,6 +124,13 @@
 ;; ---------------------------------------------------------------------------
 ;; States
 
+(defn restart
+  "Arrive in the current state afresh: its entry action runs again at the
+  start of the next frame. (A transition to the state it's already in
+  does nothing.) Its exit action doesn't run. Uses A."
+  []
+  [(gen/move :rt/state [:imm 0xFF])])
+
 (defn transition
   "Ask for a transition to another state. It happens at the start of the
   next frame: the current state's :exit action runs, then the new state's
@@ -309,33 +316,42 @@
   [(set-video-address (:nametable-0 hw/video))
    (gen/move16 :rt/pointer [:imm (keyword "screen" (clojure.core/name name))])
    (call unpack-to-video)
+   ;; a screen doesn't scroll
+   (gen/move16 :camera/x [:imm 0])
+   (gen/move :scroll/on [:imm 0])
    ;; and from now on, this is the screen `solid-at` asks about
    (gen/move16 :rt/map [:imm (keyword "solid" (clojure.core/name name))])])
 
 ;; ---------------------------------------------------------------------------
 ;; Bumping into the background
 ;;
-;; Each screen comes with a map of which of its 16x16 blocks are solid (see
-;; gamedev-toolkit.screen): 16 bytes a row, 15 rows. Finding the byte for
-;; a pixel takes no multiplying: the block's row is y / 16 and there are 16
-;; to a row, so the row's first byte is at (y / 16) * 16, which is just y
-;; with its low four bits cleared. Add the column, x / 16, and that's it.
+;; Each screen and level comes with a map of what kind of block is where
+;; (gamedev-toolkit.screen/kinds): 16 bytes for each column of blocks, top
+;; to bottom (the 15 rows of the screen, then one that's solid). So the byte
+;; for the pixel at x, y is at (x / 16) * 16 + y / 16, and (x / 16) * 16 is
+;; x with its low four bits cleared: no multiplying, even when x is a
+;; position on a level thousands of pixels wide.
 
 (def solid-at
   (sub/sub
    :solid-at
-   "Is the background solid at a pixel? Give x in X and y in Y. Afterwards
-  A is the map's byte for the block there, and the zero flag is set if
-  it's empty: (gen/when-flag :not-zero ...) runs for something solid.
-  Changes A and Y; X is left alone."
-   [[:tya]
-    [:and [:imm 0xF0]]                  ; (y / 16) * 16
-    [:sta :rt/temp]
-    [:txa]
-    [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a]   ; x / 16
-    [:ora :rt/temp]
+   "What kind of block is at a pixel? Give its x (16 bits: a position on
+  the level) in :rt/px, and its y in Y. Afterwards A is the kind (see
+  gamedev-toolkit.screen/kinds), and the zero flag is set if it's empty.
+  Changes A and Y, and leaves X alone, so it can be asked about an object
+  while X is the object's slot."
+   [[:lda :rt/px]
+    [:and [:imm 0xF0]]                  ; (x / 16) * 16
+    [:clc]
+    [:adc :rt/map]
+    [:sta :rt/cursor]
+    [:lda [:+ :rt/px 1]]
+    [:adc [:+ :rt/map 1]]
+    [:sta [:+ :rt/cursor 1]]
+    [:tya]
+    [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a]   ; y / 16
     [:tay]
-    [:lda [:ind :rt/map] :y]]))
+    [:lda [:ind :rt/cursor] :y]]))
 
 (defn on-kinds
   "After `probe` (or `solid-at`), with the kind of block in A: run `then`
@@ -361,13 +377,17 @@
 
 (defn probe
   "Ask `solid-at` about the pixel `dx` right and `dy` down from the point
-  x, y (`src` operands, one byte each). The flags answer, as for
-  `solid-at`. Uses A, X and Y."
+  x, y. x is a one-byte operand (a position on a screen) or a 16-bit one
+  made with gen/pair or gen/wide (a position on a level); y is one byte.
+  The kind is left in A, as for `solid-at`. Uses A and Y, not X."
   [x dx y dy]
-  ;; y first: if x and y are entries in a table indexed by X (see
-  ;; gen/indexed), both have to be read before X is used for the pixel
-  [(gen/with-operand :lda y) [:clc] [:adc [:imm dy]] [:tay]
-   (gen/with-operand :lda x) [:clc] [:adc [:imm dx]] [:tax]
+  [(gen/with-operand :lda (gen/lo x)) [:clc] [:adc [:imm (bit-and dx 0xFF)]] [:sta :rt/px]
+   (if (gen/pair? x)
+     (gen/with-operand :lda (gen/hi x))
+     [:lda [:imm 0]])
+   [:adc [:imm (if (neg? dx) 0xFF 0)]]  ; (a step to the left borrows from the high byte)
+   [:sta [:+ :rt/px 1]]
+   (gen/with-operand :lda y) [:clc] [:adc [:imm (bit-and dy 0xFF)]] [:tay]
    (call solid-at)])
 
 (defn draw-screen
@@ -377,13 +397,208 @@
   vertical blank. For :enter code; the screen is blank meanwhile."
   [& body]
   [[:lda [:imm 0]]
+   [:sta :rt/ctrl]                      ; (what the runtime writes to PPUCTRL)
    [:sta :ppuctrl]                      ; NMI off: it would use PPUADDR too
    [:sta :ppumask]                      ; picture off
    [:sta :rt/queue-end]                 ; anything queued was for the old screen
    [:bit :ppustatus]                    ; make PPUADDR expect a high byte
    body
    [:lda [:imm 0x80]]
+   [:sta :rt/ctrl]
    [:sta :ppuctrl]])                    ; NMI back on; it turns the picture on
+
+
+;; ---------------------------------------------------------------------------
+;; Levels wider than the screen
+;;
+;; The PPU has room for two screens' worth of background, side by side (with
+;; the cartridge wired for 'vertical mirroring'): 64 tiles across, or 32
+;; blocks. The picture can start anywhere in that, and wraps round from the
+;; right edge to the left. So a level wider than that is drawn as a ring:
+;; the 32 columns of blocks around the camera are in the PPU, and as the
+;; camera moves right, the column that's fallen furthest behind is redrawn
+;; with the next one ahead (and the other way going left). The columns
+;; being changed are well off screen, 8 blocks either side of it.
+;;
+;; A column takes too long to work out in vertical blank, so the main loop
+;; prepares it in a buffer (`prepare-column`: its 30 tiles, and the 8
+;; palette bytes for it and its neighbour), and the NMI handler copies the
+;; buffer into the PPU (`flush-column`). One column a frame is plenty: the
+;; camera would have to move 16 pixels a frame to need more.
+;;
+;; The level's data is worked out when the ROM is built
+;; (gamedev-toolkit.screen/level); the game names it with `level` and
+;; moves the camera with `follow`.
+
+(def ^:private prepare-column
+  (sub/sub
+   :prepare-column
+   "Work out the column of blocks :column/col into the column buffer: its
+  tiles (from the level's metatile numbers and the metatile tables), its
+  palette bytes, and where in the PPU they go. Uses A, X and Y."
+   [;; where the column's metatile numbers are: ids + col * 16 (the high
+    ;; byte first: shifting right would lose the carry from adding the low)
+    [:lda :column/col] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:sta :rt/temp]
+    [:lda :column/col] [:asl :a] [:asl :a] [:asl :a] [:asl :a]
+    [:clc] [:adc :scroll/ids] [:sta :rt/pointer]
+    [:lda :rt/temp] [:adc [:+ :scroll/ids 1]] [:sta [:+ :rt/pointer 1]]
+    ;; each block's four tiles: two in the left tile column, two in the
+    ;; right. Written out row by row when the ROM is built, so no counting.
+    (for [row (range 15)]
+      [[:ldy [:imm row]] [:lda [:ind :rt/pointer] :y] [:tax]
+       [:lda :metatiles/tl :x] [:sta [:+ :column-tiles (* 2 row)]]
+       [:lda :metatiles/bl :x] [:sta [:+ :column-tiles (inc (* 2 row))]]
+       [:lda :metatiles/tr :x] [:sta [:+ :column-tiles (+ 30 (* 2 row))]]
+       [:lda :metatiles/br :x] [:sta [:+ :column-tiles (+ 31 (* 2 row))]]])
+    ;; the palette bytes: 8 for each pair of columns, so at
+    ;; attrs + (col / 2) * 8 = attrs + (col & $FE) * 4
+    [:lda :column/col] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:sta :rt/temp]
+    [:lda :column/col] [:and [:imm 0xFE]] [:asl :a] [:asl :a]
+    [:clc] [:adc :scroll/attrs] [:sta :rt/pointer]
+    [:lda :rt/temp] [:adc [:+ :scroll/attrs 1]] [:sta [:+ :rt/pointer 1]]
+    (for [i (range 8)]
+      [[:ldy [:imm i]] [:lda [:ind :rt/pointer] :y] [:sta [:+ :column-attrs i]]])
+    ;; where it goes: the first nametable ($2000) or the second ($2400),
+    ;; by the column's fifth bit; two tiles across for each block
+    [:lda :column/col] [:and [:imm 15]] [:asl :a] [:sta :column/ppu]
+    [:lda :column/col] [:and [:imm 16]] [:lsr :a] [:lsr :a] [:ora [:imm 0x20]] [:sta [:+ :column/ppu 1]]
+    ;; and its palette bytes: $23C0 (or $27C0) + the block column / 2
+    [:lda :column/col] [:and [:imm 15]] [:lsr :a] [:ora [:imm 0xC0]] [:sta :column/attr]
+    (gen/move :column/pending [:imm 1])]))
+
+(def ^:private flush-column
+  (sub/sub
+   :flush-column
+   "Copy the column buffer into the PPU: in vertical blank (the NMI
+  handler does it), or with the picture off. Uses A and X."
+   [;; PPUCTRL bit 2: each write to PPUDATA steps down a row, not across
+    [:lda :rt/ctrl] [:ora [:imm 0x04]] [:sta :ppuctrl]
+    (for [half [0 1]]
+      [[:lda [:+ :column/ppu 1]] [:sta :ppuaddr]
+       [:lda :column/ppu] (when (= half 1) [[:clc] [:adc [:imm 1]]]) [:sta :ppuaddr]
+       [:ldx [:imm (* 30 half)]]
+       (gen/do-while :not-equal
+         [:lda :column-tiles :x] [:sta :ppudata]
+         [:inx]
+         [:cpx [:imm (+ 30 (* 30 half))]])])
+    [:lda :rt/ctrl] [:sta :ppuctrl]
+    ;; the palette bytes, one for each 32-pixel row
+    (for [ar (range 8)]
+      [[:lda [:+ :column/ppu 1]] [:clc] [:adc [:imm 3]] [:sta :ppuaddr]
+       [:lda :column/attr] [:clc] [:adc [:imm (* 8 ar)]] [:sta :ppuaddr]
+       [:lda [:+ :column-attrs ar]] [:sta :ppudata]])
+    (gen/move :column/pending [:imm 0])]))
+
+(def ^:private ring-start
+  (sub/sub
+   :ring-start
+   "Where the ring of drawn columns should start, for where the camera is:
+  8 columns left of it, but not before the level's start or so far that
+  the ring would run off its end. Leaves it in A."
+   [[:lda :camera/x] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:sta :rt/temp]
+    [:lda [:+ :camera/x 1]] [:asl :a] [:asl :a] [:asl :a] [:asl :a] [:ora :rt/temp]   ; camera / 16
+    [:sec] [:sbc [:imm 8]]
+    (gen/when-flag :no-carry [:lda [:imm 0]])
+    [:cmp :scroll/last]
+    (gen/when-flag :carry [:lda :scroll/last])]))
+
+(def ^:private scroll-step
+  (sub/sub
+   :scroll-step
+   "Keep the ring of drawn columns around the camera: if it should have
+  moved, prepare the column that comes into it. Uses A, X and Y."
+   (let [done (asm/genlabel "scrolled")
+         back (asm/genlabel "back")]
+     [[:lda :scroll/on]
+      [:beq done]
+      (call ring-start)
+      [:cmp :scroll/left]
+      [:beq done]
+      [:bcc back]
+      ;; forward: the column 32 ahead of the ring's start replaces it
+      [:lda :scroll/left] [:clc] [:adc [:imm 32]] [:sta :column/col]
+      [:inc :scroll/left]
+      (call prepare-column)
+      [:jmp done]
+      [:label back]
+      [:dec :scroll/left]
+      [:lda :scroll/left] [:sta :column/col]
+      (call prepare-column)
+      [:label done]])))
+
+(defn level
+  "Inside `draw-screen`: start the level called `name` (one of the game's
+  :levels): draw the 32 columns around where the camera is (so set the
+  camera first, with `follow`), and from then on keep drawing as it moves.
+  Uses A, X and Y."
+  [name]
+  (let [n (clojure.core/name name)
+        again (asm/genlabel "draw-column")]
+    [(gen/move16 :scroll/ids [:imm (keyword "level-ids" n)])
+     (gen/move16 :scroll/attrs [:imm (keyword "level-attrs" n)])
+     (gen/move16 :rt/map [:imm (keyword "level-kinds" n)])
+     (gen/move :scroll/last [:imm (keyword "level-last" n)])
+     (call ring-start)
+     [:sta :scroll/left]
+     (gen/move :scroll/i [:imm 0])
+     [:label again]
+     [:lda :scroll/left] [:clc] [:adc :scroll/i] [:sta :column/col]
+     (call prepare-column)
+     (call flush-column)
+     [:inc :scroll/i]
+     [:lda :scroll/i]
+     [:cmp [:imm 32]]
+     [:bne again]
+     (gen/move :scroll/on [:imm 1])]))
+
+(defn follow
+  "Point the camera at the level position `x` (16 bits: gen/pair or
+  gen/wide), less `offset` pixels: so whatever's at x appears `offset`
+  pixels from the screen's left edge. It stops at the ends of the level
+  called `level-name`. Uses A."
+  [x offset level-name]
+  (let [most [:imm (keyword "camera-max" (clojure.core/name level-name))]]
+    [[:sec]
+     (gen/with-operand :lda (gen/lo x)) [:sbc [:imm offset]] [:sta :camera/x]
+     (gen/with-operand :lda (gen/hi x)) [:sbc [:imm 0]] [:sta [:+ :camera/x 1]]
+     (gen/when-flag :no-carry                ; before the level's start
+       (gen/move16 :camera/x [:imm 0]))
+     (gen/compare16 :camera/x most)
+     (gen/when-flag :carry                   ; past its end
+       (gen/move16 :camera/x most))]))
+
+(defn on-screen
+  "Run `body` if something at level position `x` (16 bits: gen/pair or
+  gen/wide) is on the screen, with :rt/sx set to where across the screen
+  it is. For drawing: (on-screen x (metasprite :rt/sx y pieces)). Things
+  within 16 pixels of the right edge count as off it (their right half
+  would wrap round to the left). Uses A."
+  [x & body]
+  [[:sec]
+   (gen/with-operand :lda (gen/lo x)) [:sbc :camera/x] [:sta :rt/sx]
+   (gen/with-operand :lda (gen/hi x)) [:sbc [:+ :camera/x 1]]
+   ;; (when-flag, not plain branches: the body can be too long to branch over)
+   (gen/when-flag :zero                  ; less than 256 pixels right of the camera
+     [:lda :rt/sx] [:cmp [:imm 241]]
+     (gen/when-flag :no-carry body))])
+
+(defn sprite-text
+  "Draw a row of tiles as sprites, at a fixed place on the screen: for
+  words and numbers that stay put while the background scrolls. Each of
+  `tiles` is a tile number, or instructions that leave one in A (and
+  leave X alone). Uses A and X."
+  [x y tiles palette]
+  [[:ldx :rt/oam-next]
+   (for [[i t] (map-indexed vector tiles)
+         :let [at (fn [field] [:+ :oam (+ (* 4 i) field)])]]
+     [[:lda [:imm y]] [:sta (at 0) :x]
+      (if (number? t) [:lda [:imm t]] t) [:sta (at 1) :x]
+      [:lda [:imm palette]] [:sta (at 2) :x]
+      [:lda [:imm (+ x (* 8 i))]] [:sta (at 3) :x]])
+   [:txa]
+   [:clc]
+   [:adc [:imm (* 4 (count tiles))]]
+   [:sta :rt/oam-next]])
 
 ;; ---------------------------------------------------------------------------
 ;; Random numbers
@@ -432,11 +647,20 @@
          :seed      :u16
          :pointer   :u16                 ; for reading tables in the ROM
          :map       :u16                 ; the current screen's map of what's solid
+         :ctrl      :u8                  ; what the runtime writes to PPUCTRL
+         :px        :u16                 ; the pixel solid-at asks about
+         :cursor    :u16                 ; where in the map solid-at looks
+         :sx        :u8                  ; a position on the screen (see on-screen)
          :temp      :u8                  ; scratch, for the runtime's own routines
          :slot      :u8                  ; the object being looked at (see gamedev-toolkit.objects)
          :turn      :u8                  ; which object is drawn first this frame (see objects/each-rotating)
          :temp2     :u8                  ; more scratch
-         :old       :u16}]               ; a position to go back to (see gamedev-toolkit.platformer)
+         :old       :u16.8}]             ; a position to go back to (see gamedev-toolkit.platformer)
+   [:camera {:x :u16}]                   ; the level's x at the screen's left edge
+   [:scroll {:on :bool :left :u8 :last :u8 :i :u8 :ids :u16 :attrs :u16}]   ; see `level`
+   [:column {:pending :bool :col :u8 :ppu :u16 :attr :u8}]
+   [:column-tiles [:array 60 :u8] {:hide true}]
+   [:column-attrs [:array 8 :u8] {:hide true}]
    [:pad {:held     [:bits hw/button-bits]
           :pressed  [:bits hw/button-bits]
           :previous [:bits hw/button-bits]}]
@@ -477,6 +701,7 @@
      [:cpx [:imm 32]])
 
    (gen/move :rt/mask [:imm 0x1E])      ; show background and sprites
+   (gen/move :rt/ctrl [:imm 0x80])      ; NMI on, tiles from pattern table 0
    ;; In no state yet, with a transition to the initial state waiting: so
    ;; the first frame begins by running its entry action.
    (gen/move :rt/state [:imm 0xFF])
@@ -566,7 +791,7 @@
    [:lda [:imm 0x80]] [:sta :triangle]
    [:lda [:imm 0]] [:sta [:+ :triangle 3]]])
 
-(defn- main-loop [exits enters updates music?]
+(defn- main-loop [exits enters updates music? levels?]
   [[:label :main]
    (call read-pad)
    (when music? (call music-step))
@@ -581,6 +806,8 @@
 
    (gen/move :rt/oam-next [:imm 0])
    (dispatch updates)
+   ;; (after the update, which moves the camera)
+   (when levels? (call scroll-step))
    (call hide-unused-sprites)
 
    ;; Tell the NMI handler this frame's sprites and queue are complete,
@@ -592,7 +819,7 @@
    [:beq :wait-for-frame]
    [:jmp :main]])
 
-(def ^:private nmi
+(defn- nmi [levels?]
   [[:label :nmi]
    [:pha] [:txa] [:pha] [:tya] [:pha]   ; the main loop was using these
 
@@ -601,6 +828,11 @@
      ;; sprites: copy the page at :oam to the PPU's sprite memory
      [:lda [:imm 0]] [:sta :oamaddr]
      [:lda [:imm [:hi :oam]]] [:sta :oamdma]
+
+     ;; a column of a level coming into view (see `level`)
+     (when levels?
+       [[:lda :column/pending]
+        (gen/when-flag :not-zero (call flush-column))])
 
      ;; the queue: entries of address (high, low), count, then the tiles
      [:bit :ppustatus]
@@ -619,10 +851,17 @@
      [:sta :rt/queue-end]
      [:sta :rt/ready])
 
-   ;; Writing PPUADDR moves where the picture is drawn from: put it back.
+   ;; Writing PPUADDR moves where the picture is drawn from: put it back,
+   ;; to where the camera is. Its x's low byte is the scroll, and its next
+   ;; bit picks which of the two screens' worth of background (nametables,
+   ;; side by side: see `level`) the picture starts in.
    [:bit :ppustatus]
-   [:lda [:imm 0x80]] [:sta :ppuctrl]
-   [:lda [:imm 0]] [:sta :ppuscroll] [:sta :ppuscroll]
+   [:lda [:+ :camera/x 1]]
+   [:and [:imm 1]]
+   [:ora :rt/ctrl]
+   [:sta :ppuctrl]
+   [:lda :camera/x] [:sta :ppuscroll]
+   [:lda [:imm 0]] [:sta :ppuscroll]
    [:lda :rt/mask] [:sta :ppumask]
 
    [:inc :rt/frame]
@@ -648,6 +887,11 @@
                 (see gamedev-toolkit.palette)
     :screens    {name screen}: backgrounds (see gamedev-toolkit.screen), drawn
                 with (background name) inside draw-screen
+    :levels     {name level}: levels wider than the screen (see
+                gamedev-toolkit.screen/level), started with (level name) inside
+                draw-screen. They need :metatiles too: the map the levels
+                were made from. The cartridge is then wired for vertical
+                mirroring, so the background can scroll sideways
     :tables     {label bytes}: other data to put in the ROM, each under its label
     :songs      {name notes}: tunes (see gamedev-toolkit.sound/song), started
                 with (play-song name) and stopped with (stop-music)
@@ -656,7 +900,7 @@
                 (NES.cljs: see nes.overlay). Passed through as they are
 
   Returns what rom/nrom returns, with :name."
-  [{:keys [name states initial variables tiles palettes screens tables songs overlays]}]
+  [{:keys [name states initial variables tiles palettes screens levels metatiles tables songs overlays]}]
   (let [states (vec states)
         state-names (mapv first states)
         _ (when-not (some #{initial} state-names)
@@ -665,25 +909,39 @@
             (throw (ex-info (str ":palettes needs 32 colors, not " (count palettes)) {})))
         state-sub (fn [phase [state-name state]]
                     (sub/sub (keyword (str (clojure.core/name state-name) "-" (clojure.core/name phase)))
-                             (get state phase [])))]
+                             (get state phase [])))
+        levels? (boolean (seq levels))
+        _ (when (and levels? (not metatiles))
+            (throw (ex-info ":levels needs :metatiles too: the map the levels were made from" {})))]
     (assoc (rom/nrom
             {:code [(reset-code initial)
                     (main-loop (when (some #(:exit (second %)) states)   ; most games have none
                                  (map #(state-sub :exit %) states))
                                (map #(state-sub :enter %) states)
                                (map #(state-sub :update %) states)
-                               (seq songs))
-                    nmi
+                               (seq songs)
+                               levels?)
+                    (nmi levels?)
                     irq
                     [:label :palettes]
                     [:db palettes]
                     (for [[screen-name s] screens]
                       [[:label (keyword "screen" (clojure.core/name screen-name))]
                        [:db (screen/pack (screen/nametable s))]
-                       ;; what's solid: 240 bytes, and a row below the screen
-                       ;; that's all solid, so nothing falls out of the bottom
+                       ;; what's solid, a column at a time (see `solid-at`)
                        [:label (keyword "solid" (clojure.core/name screen-name))]
-                       [:db (:solid s) (repeat 16 1)]])
+                       [:db (screen/kind-columns (:solid s))]])
+                    (when levels?
+                      (let [{:keys [tl tr bl br]} (screen/metatile-tables metatiles)]
+                        [[:label :metatiles/tl] [:db tl]
+                         [:label :metatiles/tr] [:db tr]
+                         [:label :metatiles/bl] [:db bl]
+                         [:label :metatiles/br] [:db br]]))
+                    (for [[level-name l] levels
+                          :let [n (clojure.core/name level-name)]]
+                      [[:label (keyword "level-ids" n)] [:db (:ids l)]
+                       [:label (keyword "level-kinds" n)] [:db (:kinds l)]
+                       [:label (keyword "level-attrs" n)] [:db (:attributes l)]])
                     (for [[label bytes] tables]
                       [[:label label] [:db bytes]])
                     (for [[song-name notes] songs]
@@ -692,7 +950,13 @@
              :vectors {:nmi :nmi :reset :reset :irq :irq}
              :symbols (merge hw/registers
                              (into {} (map-indexed (fn [i n] [(keyword "state" (clojure.core/name n)) i])
-                                                   state-names)))
+                                                   state-names))
+                             ;; each level's last ring start, and how far the camera can go
+                             (into {} (for [[level-name {:keys [columns]}] levels
+                                            :let [n (clojure.core/name level-name)]]
+                                        {(keyword "level-last" n) (- columns 32)
+                                         (keyword "camera-max" n) (* 16 (- columns 16))})))
+             :mirroring (if levels? :vertical :horizontal)
              :memory (memory/allocate (concat (runtime-variables state-names)
                                                (when (seq songs)
                                                  [[:music {:at :u16 :start :u16 :wait :u8 :on :bool}]])

@@ -301,10 +301,36 @@ move to its own repository once its API settles. Games are in
   - **Flicker instead of vanishing** – `objects/each-rotating` draws objects in a different
     order each frame
   - `games.platform-kit` takes all of these as options; Star Hopper and Alienscape are unchanged
-- [ ] **Engine, part three** – scrolling (a camera, and drawing new columns as they come into
-  view) and levels wider than a screen, which needs objects with more than one byte of
-  position; a second mapper (UxROM or MMC1), for games that outgrow 16 KB; platforms that move
-  (and carry the player)
+- [x] **Engine, part three: scrolling** – `games.star-run`, Star Run, and what it needed:
+  - **Levels wider than the screen** – `screen/level`: 15 rows of text up to 240 blocks long;
+    its tiles, palettes and what's solid worked out a column at a time when the ROM is built
+  - **Drawing as the camera moves** – `rt/level` draws the 32 columns around the camera; the
+    main loop prepares each column that comes into view and the NMI handler copies it in
+    (vertical mirroring: two screens side by side, as a ring); `rt/follow` moves the camera
+  - **16-bit positions** – `:u16.8` variables, `gen/whole16`, `gen/add-wide`; 16-bit object
+    fields (`objects/field16`); `solid-at` looks up a level position; `rt/on-screen` turns a
+    level position into a screen one; `gen/when-close` across 16 bits
+  - **One way to write operands** – every generator takes addresses, `[:imm n]`, table entries
+    (`gen/indexed`) and 16-bit pairs (`gen/pair`, `gen/wide`)
+  - `probe` and `solid-at` no longer change X, so code looking at objects needn't keep
+    reloading the object's slot; `rt/restart` re-enters the current state; `rt/sprite-text`
+  - The kit runs every game on 16-bit positions; Star Hopper, Alienscape and Star Tower are
+    unchanged, and their tests pass as they were
+- [ ] **Engine, part four** – a second mapper (UxROM or MMC1), for games that outgrow 16 KB
+  (Star Run uses 9 of its 16); platforms that move (and carry the player); objects that appear
+  as the camera nears them, instead of all being active all the time; vertical scrolling
+- [ ] **Toolkit ergonomics** (from a review after part three) – the layers below are sound
+  (the assembler, linker, allocator and generators have property tests, and every game is played
+  headlessly in `npm test`), but some things are still kept by convention:
+  - the runtime's scratch bytes (`:rt/temp`, `:rt/temp2`, `:rt/old`, `:rt/pointer`) belong to
+    whichever routine is running: nothing checks two don't overlap. Declare them per routine,
+    and have the linker check
+  - which registers a routine changes is checked only by `gen/times`. `analysis/clobbers` could
+    check `objects/each` bodies, and calls generally
+  - a struct's fields are `:player/x` in code but `:player.x` in an overlay's values (when the
+    lens flattens a struct of more than four fields); one spelling would be better
+  - `games.platform-kit` is game code that's grown options; if a third kind of game wants it,
+    split it into pieces instead of adding more
 - [ ] **Engine follow-ups** – animation as data (frames and timings in a table) rather than
   code; a second voice for the music (on a pulse channel, giving way to sound effects);
   `move-body` for objects in a pool, so enemies can jump; the player climbing onto a ladder

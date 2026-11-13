@@ -156,21 +156,86 @@
     (is (= [10 20 30] (order 2)) "and wraps")))
 
 (deftest is-it-solid
-  ;; a 16 x 16 map with one solid block, at column 3, row 2
-  (let [solid (assoc (vec (repeat 256 0)) (+ (* 2 16) 3) 1)
+  ;; a map 32 columns wide (two screens), a column at a time, 16 bytes each:
+  ;; one solid block at column 3, row 2, and another at column 20, row 5
+  (let [kinds (-> (vec (repeat 512 0))
+                  (assoc (+ (* 3 16) 2) 1)
+                  (assoc (+ (* 20 16) 5) 2))
         ask (fn [x y]
-              (let [r (harness/run-routine [[:ldx [:imm x]] [:ldy [:imm y]] (call rt/solid-at) [:rts]
-                                            [:label :map] [:db solid]]
-                                           {:symbols {:rt/map 0x10 :rt/temp 0x12}
-                                            ;; the routine is at $8000: 3 instructions and the RTS before the table
-                                            :memory {0x10 [0x08 0x80]}})]
+              (let [r (harness/run-routine [[:ldx [:imm 0x55]]
+                                            (rt/probe (gen/pair :px-lo :px-hi) 0 :py 0)
+                                            [:rts]
+                                            [:label :map] [:db kinds]]
+                                           {:symbols {:rt/map 0x10 :rt/px 0x12 :rt/cursor 0x14
+                                                      :px-lo 0x20 :px-hi 0x21 :py 0x22}
+                                            :memory {0x10 [0x00 0x00]   ; (set below)
+                                                     0x20 [(bit-and x 0xFF) (bit-shift-right x 8) y]}})
+                    ;; the map's address: after the code, so look it up
+                    _ (identity r)]
+                r))
+        ;; the routine is at $8000; find where :map ended up, then ask again with it set
+        where (:map (:labels (ask 0 0)))
+        ask (fn [x y]
+              (let [r (harness/run-routine [[:ldx [:imm 0x55]]
+                                            (rt/probe (gen/pair :px-lo :px-hi) 0 :py 0)
+                                            [:rts]
+                                            [:label :map] [:db kinds]]
+                                           {:symbols {:rt/map 0x10 :rt/px 0x12 :rt/cursor 0x14
+                                                      :px-lo 0x20 :px-hi 0x21 :py 0x22}
+                                            :memory {0x10 [(bit-and where 0xFF) (bit-shift-right where 8)]
+                                                     0x20 [(bit-and x 0xFF) (bit-shift-right x 8) y]}})]
                 [(:a r) (:x r)]))]
-    (is (= [1 48] (ask 48 32)) "the block's top left pixel; X is left alone")
-    (is (= [1 63] (ask 63 47)) "its bottom right")
+    (is (= [1 0x55] (ask 48 32)) "the block's top left pixel; X is left alone")
+    (is (= [1 0x55] (ask 63 47)) "its bottom right")
     (is (= 0 (first (ask 47 32))) "one pixel to the left")
     (is (= 0 (first (ask 64 40))) "one to the right")
     (is (= 0 (first (ask 50 31))) "one above")
-    (is (= 0 (first (ask 50 48))) "one below")))
+    (is (= 0 (first (ask 50 48))) "one below")
+    (is (= [2 0x55] (ask 330 90)) "past the first 256 pixels: column 20 (x 320-335), row 5")
+    (is (= 0 (first (ask 336 90))))
+    (testing "a step to the left of a 16-bit position borrows"
+      (let [r (harness/run-routine [(rt/probe (gen/pair :px-lo :px-hi) -1 :py 0) [:rts]]
+                                   {:symbols {:rt/map 0x10 :rt/px 0x12 :rt/cursor 0x14
+                                              :px-lo 0x20 :px-hi 0x21 :py 0x22}
+                                    :memory {0x20 [0x00 0x01 0]}
+                                    :max-cycles 1000})]
+        (is (= [0xFF 0x00] [((:peek r) 0x12) ((:peek r) 0x13)]) "256 - 1 = 255")))))
+
+(deftest one-byte-and-wide-positions
+  (testing "an 8.8 speed added to a 16.8 position carries into the third byte, and borrows"
+    (let [run (fn [pos speed]
+                (let [r (harness/run-routine [(gen/add-wide :p :v) [:rts]]
+                                             {:symbols {:p 0x10 :v 0x14}
+                                              :memory {0x10 [0 (bit-and pos 0xFF) (bit-shift-right pos 8)]
+                                                       0x14 [(bit-and speed 0xFF) (bit-and (bit-shift-right speed 8) 0xFF)]}})]
+                  (+ ((:peek r) 0x11) (* 256 ((:peek r) 0x12)))))]
+      (is (= 256 (run 255 (gen/fixed 1))))
+      (is (= 255 (run 256 (gen/fixed -1))))
+      (is (= 1000 (run 998 (gen/fixed 2))))))
+  (testing "16-bit generators on a pair of table entries"
+    (let [r (harness/run-routine [[:ldx [:imm 2]]
+                                  (gen/inc16 (gen/pair (gen/indexed :lo :x) (gen/indexed :hi :x)))
+                                  [:rts]]
+                                 {:symbols {:lo 0x20 :hi 0x30}
+                                  :memory {0x22 0xFF 0x32 0x01}})]
+      (is (= [0x00 0x02] [((:peek r) 0x22) ((:peek r) 0x32)]) "$01FF + 1, the bytes in different tables")))
+  (testing "close, across more than 256 pixels"
+    (let [close? (fn [a b]
+                   (let [r (harness/run-routine [(gen/when-close [(gen/pair :ax-lo :ax-hi) :ay]
+                                                                 [(gen/pair :bx-lo :bx-hi) :by] 12
+                                                   [:inc :hit])
+                                                 [:rts]]
+                                                {:symbols {:ax-lo 0x20 :ax-hi 0x21 :ay 0x22
+                                                           :bx-lo 0x23 :bx-hi 0x24 :by 0x25 :hit 0x26}
+                                                 :memory {0x20 [(bit-and a 0xFF) (bit-shift-right a 8) 100
+                                                                (bit-and b 0xFF) (bit-shift-right b 8) 100]}})]
+                     (pos? ((:peek r) 0x26))))]
+      (is (close? 300 300))
+      (is (close? 300 311))
+      (is (not (close? 300 312)))
+      (is (close? 311 300))
+      (is (not (close? 300 44)) "300 and 44 have the same low byte's distance as 256 apart: not close")
+      (is (close? 250 260) "either side of 256"))))
 
 (deftest random-numbers
   ;; call `random` 600 times, collecting the bytes

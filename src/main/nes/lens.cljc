@@ -23,6 +23,8 @@
     [:u8 addr]              unsigned byte, 0-255
     [:s8 addr]              signed byte, -128 to 127
     [:u16 addr]             16-bit number, low byte first (the 6502's order)
+    [:u16.8 addr]           24-bit fixed point: a fraction byte, then a
+                            16-bit whole number (positions on wide levels)
     [:u8.8 addr]            16-bit fixed point: a fraction byte, then a whole
     [:s8.8 addr]            byte, read as one number (the 16 bits / 256).
                             Common for positions and speeds finer than a
@@ -60,7 +62,7 @@
             [nes.snapshot :as snapshot]
             [nes.text-table :as text-table]))
 
-(def ^:private sizes {:u8 1 :s8 1 :u16 2 :u8.8 2 :s8.8 2 :bool 1 :enum 1 :bits 1})
+(def ^:private sizes {:u8 1 :s8 1 :u16 2 :u8.8 2 :s8.8 2 :u16.8 3 :bool 1 :enum 1 :bits 1})
 
 (defn- size-of [type]
   (or (sizes type)
@@ -94,6 +96,9 @@
       :s8 (when-let [b (byte addr)] (if (>= b 0x80) (- b 0x100) b))
       :u16 (let [lo (byte addr) hi (byte (inc addr))]
              (when (and lo hi) (bit-or lo (bit-shift-left hi 8))))
+      :u16.8 (let [f (byte addr) lo (byte (inc addr)) hi (byte (+ addr 2))]
+               (when (and f lo hi)
+                 (/ (+ f (* 256 lo) (* 65536 hi)) 256.0)))
       (:u8.8 :s8.8) (let [lo (byte addr) hi (byte (inc addr))]
                       (when (and lo hi)
                         (let [v (bit-or lo (bit-shift-left hi 8))]
@@ -155,6 +160,8 @@
     (case type
       (:u8 :s8) [(w addr (number value))]
       :u16 (let [v (number value)] [(w addr v) (w (inc addr) (bit-shift-right v 8))])
+      :u16.8 (let [v (util/round (* 256 (if (number? value) value (util/parse-number value))))]
+               [(w addr v) (w (inc addr) (bit-shift-right v 8)) (w (+ addr 2) (bit-shift-right v 16))])
       (:u8.8 :s8.8) (let [v (util/round (* 256 (if (number? value) value (util/parse-number value))))]
                       [(w addr v) (w (inc addr) (bit-shift-right v 8))])
       :bool [(w addr (if value 1 0))]
@@ -205,7 +212,7 @@
   ([spec] (editable? spec []))
   ([[type addr & args] path]
    (case type
-     (:u8 :s8 :u16 :u8.8 :s8.8 :bool :enum :bcd :digits :text) (empty? path)
+     (:u8 :s8 :u16 :u8.8 :s8.8 :u16.8 :bool :enum :bcd :digits :text) (empty? path)
      :bits (= 1 (count path))
      :array (and (seq path) (editable? (elem-spec (second args) 0) (rest path)))
      :struct (and (seq path)

@@ -33,6 +33,9 @@
 
     :u8 :s8 :bool            one byte
     :u16                     two bytes, low byte first
+    :u16.8                   three bytes of fixed point: a fraction byte, then a
+                             16-bit whole number. For positions on a level
+                             wider than the screen (see gen/whole16, gen/add-wide)
     :u8.8 :s8.8              two bytes of 'fixed point': a fraction byte, then
                              a whole-number byte, so 1.5 is the 16-bit number
                              384 (1.5 x 256). For positions and speeds finer
@@ -59,7 +62,7 @@
   {:zero-page [0x0000 0x00FF]
    :ram       [0x0300 0x07FF]})
 
-(def ^:private scalar-sizes {:u8 1 :s8 1 :bool 1 :u16 2 :u8.8 2 :s8.8 2})
+(def ^:private scalar-sizes {:u8 1 :s8 1 :bool 1 :u16 2 :u8.8 2 :s8.8 2 :u16.8 3})
 
 (defn- fail [message entry]
   (throw (ex-info (str message "\n  in " (pr-str entry)) {:entry entry})))
@@ -68,7 +71,7 @@
   (cond
     (scalar-sizes t) (scalar-sizes t)
     (and (vector? t) (#{:enum :bits} (first t)) (map? (second t))) 1
-    :else (fail (str "Unknown type " (pr-str t) ". Single values are :u8, :s8, :bool, :u16, :u8.8, :s8.8, [:enum {...}] or [:bits {...}]") entry)))
+    :else (fail (str "Unknown type " (pr-str t) ". Single values are :u8, :s8, :bool, :u16, :u8.8, :s8.8, :u16.8, [:enum {...}] or [:bits {...}]") entry)))
 
 (defn- field-pairs
   "A struct's fields, as [[name type] ...], from a map or pairs."

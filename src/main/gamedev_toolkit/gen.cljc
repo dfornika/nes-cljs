@@ -36,35 +36,79 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Operands
+;;
+;; Every generator here takes its operands in the same few shapes:
+;;
+;;   :score, 0x10, [:+ :oam 3]    the byte at an address (for 16-bit values,
+;;                                the low byte; the high byte is the next)
+;;   [:imm 5]                     a number
+;;   (indexed :thing/x :x)        an entry in a table: the byte at the
+;;                                address plus the X (or Y) register
+;;   (pair lo hi)                 a 16-bit value whose two bytes aren't next
+;;                                to each other: each an operand above. For
+;;                                16-bit fields in a structure of arrays,
+;;                                where the low and high bytes are in
+;;                                different tables
+;;
+;; `lo` and `hi` pick the bytes of any of these, and `with-operand` makes
+;; an instruction of one.
 
 (defn- imm? [operand]
   (and (vector? operand) (= :imm (first operand))))
 
+(defn indexed
+  "An operand that's one entry of a table: the byte at `addr` plus the X
+  (or Y) register: (move :speed (indexed :enemies/speed :x))"
+  [addr register]
+  {:addr addr :index register})
+
+(defn- table-entry? [o] (and (map? o) (contains? o :addr)))
+
+(defn pair
+  "A 16-bit operand made of two one-byte operands, low byte first."
+  [lo hi]
+  {:lo lo :hi hi})
+
+(defn pair?
+  "Is `o` a 16-bit operand made with `pair` (or `wide`)?"
+  [o]
+  (and (map? o) (contains? o :lo)))
+
 (defn lo
   "The operand for the low byte of 16-bit operand `o`."
   [o]
-  (if (imm? o) [:imm [:lo (second o)]] o))
+  (cond (imm? o) [:imm [:lo (second o)]]
+        (pair? o) (:lo o)
+        :else o))
 
 (defn hi
   "The operand for the high byte of 16-bit operand `o`."
   [o]
-  (if (imm? o) [:imm [:hi (second o)]] [:+ o 1]))
+  (cond (imm? o) [:imm [:hi (second o)]]
+        (pair? o) (:hi o)
+        (table-entry? o) (update o :addr (fn [a] [:+ a 1]))
+        :else [:+ o 1]))
 
-(defn indexed
-  "An operand that's one entry of a table: the byte at `addr` plus the X
-  (or Y) register. For the one-byte generators (`move`, `add`,
-  `subtract`, `abs-difference`, `when-close`), and for tables of objects:
-  (move :speed (indexed :enemies/speed :x))"
-  [addr register]
-  {:addr addr :index register})
+(defn wide
+  "`o` (a 16-bit operand of any shape) as a `pair`: for generators that
+  take either one byte or two and need to be told which."
+  [o]
+  (pair (lo o) (hi o)))
 
 (defn with-operand
-  "The instruction `mnemonic` on `operand`: an ordinary operand, or one
-  made with `indexed`."
+  "The instruction `mnemonic` on one-byte operand `operand`."
   [mnemonic operand]
-  (if (map? operand)
-    [mnemonic (:addr operand) (:index operand)]
-    [mnemonic operand]))
+  (cond (pair? operand)
+        (throw (ex-info (str "A 16-bit operand where one byte was wanted: " (pr-str operand)
+                             ". Pick a byte with lo or hi.")
+                        {:operand operand}))
+        (table-entry? operand) [mnemonic (:addr operand) (:index operand)]
+        :else [mnemonic operand]))
+
+(defn- op
+  "An instruction on one byte of an operand: (op :lda lo x)"
+  [mnemonic byte-of o]
+  (with-operand mnemonic (byte-of o)))
 
 ;; ---------------------------------------------------------------------------
 ;; Moving and arithmetic. All of these use A.
@@ -97,34 +141,34 @@
   is how the carry out of the low bytes gets into the high bytes."
   [dst src]
   [[:clc]
-   [:lda (lo dst)] [:adc (lo src)] [:sta (lo dst)]
-   [:lda (hi dst)] [:adc (hi src)] [:sta (hi dst)]])
+   (op :lda lo dst) (op :adc lo src) (op :sta lo dst)
+   (op :lda hi dst) (op :adc hi src) (op :sta hi dst)])
 
 (defn sub16
   "dst = dst - src (two bytes)."
   [dst src]
   [[:sec]
-   [:lda (lo dst)] [:sbc (lo src)] [:sta (lo dst)]
-   [:lda (hi dst)] [:sbc (hi src)] [:sta (hi dst)]])
+   (op :lda lo dst) (op :sbc lo src) (op :sta lo dst)
+   (op :lda hi dst) (op :sbc hi src) (op :sta hi dst)])
 
 (defn inc16
   "dst = dst + 1 (two bytes). Changes no registers: INC works on memory."
   [dst]
   (let [done (asm/genlabel "inc16")]
-    [[:inc (lo dst)]
+    [(op :inc lo dst)
      [:bne done]             ; the low byte only becomes 0 by wrapping from 255
-     [:inc (hi dst)]
+     (op :inc hi dst)
      [:label done]]))
 
 (defn dec16
   "dst = dst - 1 (two bytes)."
   [dst]
   (let [no-borrow (asm/genlabel "dec16")]
-    [[:lda (lo dst)]
+    [(op :lda lo dst)
      [:bne no-borrow]        ; a low byte of 0 is about to wrap to 255: borrow
-     [:dec (hi dst)]
+     (op :dec hi dst)
      [:label no-borrow]
-     [:dec (lo dst)]]))
+     (op :dec lo dst)]))
 
 (defn compare16
   "Compare two 16-bit values, leaving the flags as CMP does for bytes:
@@ -134,9 +178,9 @@
     (when-flag :ne ...)  a != b     (when-flag :cc ...)  a < b"
   [a b]
   (let [done (asm/genlabel "compare16")]
-    [[:lda (hi a)] [:cmp (hi b)]
+    [(op :lda hi a) (op :cmp hi b)
      [:bne done]             ; the high bytes differ: they decide it
-     [:lda (lo a)] [:cmp (lo b)]
+     (op :lda lo a) (op :cmp lo b)
      [:label done]]))
 
 ;; ---------------------------------------------------------------------------
@@ -501,8 +545,8 @@
   for `compare-signed`."
   [a b]
   (let [ok (asm/genlabel "signed")]
-    [[:lda (lo a)] [:cmp (lo b)]         ; just for the borrow into the high bytes
-     [:lda (hi a)] [:sbc (hi b)]
+    [(op :lda lo a) (op :cmp lo b)       ; just for the borrow into the high bytes
+     (op :lda hi a) (op :sbc hi b)
      [:bvc ok]
      [:eor [:imm 0x80]]
      [:label ok]]))
@@ -529,8 +573,8 @@
   "dst = -dst (two bytes): turns a speed around. Uses A."
   [dst]
   [[:sec]
-   [:lda [:imm 0]] [:sbc (lo dst)] [:sta (lo dst)]
-   [:lda [:imm 0]] [:sbc (hi dst)] [:sta (hi dst)]])
+   [:lda [:imm 0]] (op :sbc lo dst) (op :sta lo dst)
+   [:lda [:imm 0]] (op :sbc hi dst) (op :sta hi dst)])
 
 (defn abs-difference
   "A = how far apart the bytes `a` and `b` are, whichever is bigger."
@@ -541,17 +585,38 @@
      [:eor [:imm 0xFF]]
      [:adc [:imm 1]])])
 
+(defn- when-close-across
+  "Run `body` if the 16-bit values a and b are less than `distance` apart:
+  that's when a - b + (distance - 1) is from 0 up to 2 x distance - 2,
+  which is one unsigned comparison once it's worked out. Uses A and Y."
+  [a b distance body]
+  [[:sec]
+   (op :lda lo a) (op :sbc lo b) [:tay]          ; (TAY leaves the carry alone)
+   (op :lda hi a) (op :sbc hi b)
+   [:pha]
+   [:tya] [:clc] [:adc [:imm (dec distance)]] [:tay]
+   [:pla]                                        ; (and so does PLA)
+   [:adc [:imm 0]]
+   (when-flag :zero                              ; not more than 255 apart
+     [:tya]
+     [:cmp [:imm (dec (* 2 distance))]]
+     (when-flag :no-carry body))])
+
 (defn when-close
   "Run `body` if two points are within `distance` of each other both
   across and down: a simple test for two things touching. Each point is
-  [x y], as `src` operands (one byte each). Uses A."
+  [x y], as one-byte operands; or with x as a 16-bit operand (made with
+  `pair` or `wide`), for points on a level wider than the screen (then it
+  uses Y as well). Uses A."
   [[ax ay] [bx by] distance & body]
-  [(abs-difference ax bx)
-   [:cmp [:imm distance]]
-   (when-flag :no-carry
-     (abs-difference ay by)
-     [:cmp [:imm distance]]
-     (when-flag :no-carry body))])
+  (let [down [(abs-difference ay by)
+              [:cmp [:imm distance]]
+              (when-flag :no-carry body)]]
+    (if (or (pair? ax) (pair? bx))
+      (when-close-across (wide ax) (wide bx) distance down)
+      [(abs-difference ax bx)
+       [:cmp [:imm distance]]
+       (when-flag :no-carry down)])))
 
 (defn inc-decimal
   "Add 1 to a number kept as `n` decimal digits, one per byte, most
@@ -590,6 +655,27 @@
   at `addr` (its second byte): [:lda (whole :player/x)]"
   [addr]
   (hi addr))
+
+(defn whole16
+  "The whole number of a 16.8 fixed-point variable at `addr` (a :u16.8:
+  a fraction byte, then two whole bytes), as a 16-bit `pair`: a position
+  on a level up to 65,535 pixels wide."
+  [addr]
+  (pair [:+ addr 1] [:+ addr 2]))
+
+(defn add-wide
+  "dst = dst + v, where dst is a 16.8 fixed-point variable (three bytes:
+  fraction, then a 16-bit whole number) and v is a signed 8.8 speed (any
+  16-bit operand). The speed's sign is spread into the top byte: moving
+  left by 1 adds $FF.FF00. Uses A."
+  [dst v]
+  [[:clc]
+   [:lda dst] (op :adc lo v) [:sta dst]
+   [:lda [:+ dst 1]] (op :adc hi v) [:sta [:+ dst 1]]
+   (op :lda hi v)                        ; (LDA leaves the carry alone)
+   (if-flag :negative
+     [[:lda [:+ dst 2]] [:adc [:imm 0xFF]] [:sta [:+ dst 2]]]
+     [[:lda [:+ dst 2]] [:adc [:imm 0]] [:sta [:+ dst 2]]])])
 
 (defn clamp-fixed
   "Keep the 8.8 fixed-point variable at `addr` between the whole numbers
