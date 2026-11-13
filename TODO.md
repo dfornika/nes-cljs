@@ -75,7 +75,8 @@ committed to; pick whatever looks fun.
   (2) a host-call opcode: one of the 12 that jam a real 6502 ($02, $12, $22...), followed by a
   byte saying which function. The emulator runs the function and carries on. More powerful
   (it can stand in for a whole routine) but the ROM only runs here, so builds must be able to
-  refuse or strip it. Start with (1) in `nes.cpu.harness`, where it's a few lines
+  refuse or strip it. Start with (1) in `nes.cpu.harness`, where it's a few lines. (Both
+  belong with the enhanced mode: `docs/enhanced_mode.md`)
 
 - [x] **Breakpoints** – execute / read / write / access, address ranges, a value to match,
   conditions from the REPL; gutter dots in the CPU tab, "on write" buttons in the Memory
@@ -173,6 +174,10 @@ played. So combine them.
 - [ ] **Faster core** – the step function allocates closures per instruction; whole frames
   run 1.0–1.2× jsnes's time now
 - [ ] **A ClojureScript PPU**, then a whole console behind the `Emulator` protocol
+- [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,
+  overclocking without changing what's on screen, other master palettes), then a "meta-NES
+  mapper" (per-tile palettes, a multiplier, more sprites, extra sound), and perhaps one day a
+  different machine (16:9, more colors, extended opcodes). See `docs/enhanced_mode.md`
 
 ## Making games (Phases 4 and 5)
 
@@ -400,6 +405,8 @@ a JVM emulator could reuse it one day.
 
 ## Housekeeping
 
+- [ ] **A frame-budget meter** in the CPU tab: how much of each frame the game used (see
+  `docs/enhanced_mode.md`). Doesn't need our own PPU
 - [ ] **The breakpoint form sometimes empties itself** – in the smoke test, about one run in
   ten, the address typed into the CPU tab's "Stop on" form is gone before Add is clicked (the
   test now fills it in again). Find out why: something re-creating the form, or the way
