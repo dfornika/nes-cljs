@@ -135,7 +135,12 @@ played. So combine them.
 - [ ] **Our own games' compiler** emits code lenses, so the same tools debug them
 - [ ] **Annotation by homology** – the gene annotation idea: recognize a routine because it
   resembles one already named in another game (shared sound drivers, libraries), by comparing
-  instruction sequences with the operands masked out, the way BLAST transfers gene names
+  instruction sequences with the operands masked out, the way BLAST transfers gene names.
+  Notes, with genome formats for all of it (FASTA, GFF3, GenBank, alignments, Mash), in
+  `docs/rom_annotation.md`
+- [ ] **A GFF3 file from every build** (and a Mesen `.mlb`): where each subroutine and table
+  is, from the linker. The true answer to test homology search against; see
+  `docs/rom_annotation.md`, "Where to start"
 
 ## Playing games properly
 
