@@ -178,7 +178,9 @@ played. So combine them.
   Instructions tab and `nes.cpu.core`; nestest's whole log (8,991 lines) matches
 - [ ] **Faster core** – the step function allocates closures per instruction; whole frames
   run 1.0–1.2× jsnes's time now
-- [ ] **A ClojureScript PPU**, then a whole console behind the `Emulator` protocol
+- [ ] **A ClojureScript PPU**, then a whole console behind the `Emulator` protocol. A plan,
+  step by step, in `docs/ppu_plan.md`: portable `.cljc`, by the dot, with a whole-frame
+  renderer as its test oracle; first milestone, our own games running on our own console
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,
   overclocking without changing what's on screen, other master palettes), then a "meta-NES
   mapper" (per-tile palettes, a multiplier, more sprites, extra sound), and perhaps one day a
