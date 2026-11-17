@@ -194,7 +194,14 @@ played. So combine them.
     places jsnes differs from a PPU: it blacks out the left 8 pixels when either layer is
     hidden there, and it draws 32 tiles a line, so with fine X scroll the last few pixels on
     the right are backdrop (a PPU draws a 33rd tile)
-  - [ ] **Step 3: the dot-stepped PPU** – next; see the plan
+  - [x] **Step 3: the dot-stepped PPU** – `nes.ppu.core`: `tick!` runs one dot (fetches,
+    shift registers, scroll increments, sprite search and fetches, the pixel, vertical blank,
+    the odd frame's skipped dot), and `cpu-read!`/`cpu-write!` for the registers that act
+    differently while drawing. Random frames match `nes.ppu.render` pixel for pixel, with the
+    same sprite 0 hit and overflow; a scroll split works; our games' frames from jsnes's state
+    match too. Not yet: the overflow flag's hardware bug, the PPUSTATUS-read race at the start
+    of vertical blank, speed (about 38 ms a frame on the JVM; 16.7 is the budget)
+  - [ ] **Step 4: a console and mapper 0** – next; see the plan
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,

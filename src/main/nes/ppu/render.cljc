@@ -78,6 +78,14 @@
 ;; ---------------------------------------------------------------------------
 ;; Sprites
 
+(defn- sprites-on-line
+  "How many sprites are on line `y`. (More than 8 sets the overflow flag.)"
+  [oam y sprite-height]
+  (loop [i 0, found 0]
+    (if (= i 64)
+      found
+      (recur (inc i) (if (< -1 (- y (inc (bytes/at oam (* 4 i)))) sprite-height) (inc found) found)))))
+
 (defn- sprite-line!
   "Draw the sprites on line `y` into `line` (256 bytes: 0 where there's no
   sprite, else $80 + (sprite 0? $40) + (behind? $20) + palette*4 + color).
@@ -140,7 +148,8 @@
 
   Returns what the PPU would have noticed on the way:
   {:sprite-0-hit [x y] or nil, :overflow-line the first line with more
-  than 8 sprites, or nil}."
+  than 8 sprites (up to 240: the PPU looks for line 240's sprites too,
+  though it never draws them), or nil}."
   [out {:keys [memory palette oam ctrl mask t x]}]
   (let [show-bg? (bit-test mask 3)
         show-sprites? (bit-test mask 4)
@@ -162,10 +171,14 @@
           {:sprite-0-hit nil :overflow-line nil})
       (loop [y 0, v (r/copy-y 0 t), hit nil, overflow nil]
         (if (= y height)
-          {:sprite-0-hit hit :overflow-line overflow}
+          ;; The PPU looks for sprites whenever it's drawing, shown or not,
+          ;; and on line 239 looks for line 240's, which is never drawn
+          {:sprite-0-hit hit
+           :overflow-line (or overflow (when (> (sprites-on-line oam height sprite-height) 8) height))}
           (let [v (r/copy-x v t)
                 _ (if show-bg? (background-line! bg memory v x bg-table) (bytes/fill! bg 0))
-                found (if show-sprites? (sprite-line! spr memory oam y sprite-height sprite-table) (do (bytes/fill! spr 0) 0))
+                _ (if show-sprites? (sprite-line! spr memory oam y sprite-height sprite-table) (bytes/fill! spr 0))
+                found (sprites-on-line oam y sprite-height)
                 hit (loop [px 0, hit hit]
                       (if (= px width)
                         hit

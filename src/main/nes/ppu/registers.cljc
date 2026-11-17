@@ -186,7 +186,7 @@
    :palette (bytes/make 32)})
 
 (defn reg "The register at index `i` of `ppu`'s registers." [ppu i] (bytes/word-at (:regs ppu) i))
-(defn- reg! [ppu i value] (bytes/put-word! (:regs ppu) i value))
+(defn set-reg! "Set the register at index `i` of `ppu`'s registers." [ppu i value] (bytes/put-word! (:regs ppu) i value))
 
 (defn registers
   "All the registers as a map, for showing and testing:
@@ -199,7 +199,7 @@
   "Turn a PPUSTATUS bit (VBLANK, SPRITE-0-HIT, OVERFLOW) on or off."
   [ppu bit on?]
   (let [s (reg ppu STATUS)]
-    (reg! ppu STATUS (if on? (bit-or s bit) (bit-and s (bit-xor 0xFF bit))))))
+    (set-reg! ppu STATUS (if on? (bit-or s bit) (bit-and s (bit-xor 0xFF bit))))))
 
 (defn nmi?
   "Is the PPU asking for an NMI? It is while it's in vertical blank with NMI
@@ -222,7 +222,7 @@
   "After a PPUDATA access: v moves on by 1, or by 32 (a row of tiles down)
   if PPUCTRL bit 2 is on."
   [ppu]
-  (reg! ppu V (bit-and (+ (reg ppu V) (if (bit-test (reg ppu CTRL) 2) 32 1)) 0x7FFF)))
+  (set-reg! ppu V (bit-and (+ (reg ppu V) (if (bit-test (reg ppu CTRL) 2) 32 1)) 0x7FFF)))
 
 (defn- read-data!
   "A read of PPUDATA. Reads of video memory come through a buffer: each
@@ -234,10 +234,10 @@
   (let [addr (bit-and (reg ppu V) 0x3FFF)
         value (if (< addr 0x3F00)
                 (let [old (reg ppu BUFFER)]
-                  (reg! ppu BUFFER (memory/video-read mem addr))
+                  (set-reg! ppu BUFFER (memory/video-read mem addr))
                   old)
                 (do
-                  (reg! ppu BUFFER (memory/video-read mem (bit-and addr 0x2FFF)))
+                  (set-reg! ppu BUFFER (memory/video-read mem (bit-and addr 0x2FFF)))
                   ;; 6 bits of color; the top 2 are whatever was on the bus
                   (bit-or (bit-and (bytes/at (:palette ppu) (palette-index addr)) 0x3F)
                           (bit-and (reg ppu LATCH) 0xC0))))]
@@ -263,7 +263,7 @@
   (let [value (case (int (bit-and addr 7))
                 2 (let [v (bit-or (bit-and (reg ppu STATUS) 0xE0) (bit-and (reg ppu LATCH) 0x1F))]
                     (set-status! ppu VBLANK false)
-                    (reg! ppu W 0)
+                    (set-reg! ppu W 0)
                     v)
                 4 (let [i (reg ppu OAM-ADDR)
                         v (bytes/at (:oam ppu) i)]
@@ -271,35 +271,35 @@
                     (if (= 2 (bit-and i 3)) (bit-and v 0xE3) v))
                 7 (read-data! ppu mem)
                 (reg ppu LATCH))]
-    (reg! ppu LATCH value)
+    (set-reg! ppu LATCH value)
     value))
 
 (defn write!
   "The CPU writes `value` to PPU register `addr` ($2000-$3FFF; only the low
   3 bits matter). `mem` is the video memory (see nes.ppu.memory)."
   [ppu mem addr value]
-  (reg! ppu LATCH value)
+  (set-reg! ppu LATCH value)
   (case (int (bit-and addr 7))
-    0 (do (reg! ppu CTRL value)
-          (reg! ppu T (after-ctrl (reg ppu T) value)))
-    1 (reg! ppu MASK value)
+    0 (do (set-reg! ppu CTRL value)
+          (set-reg! ppu T (after-ctrl (reg ppu T) value)))
+    1 (set-reg! ppu MASK value)
     2 nil                                  ; PPUSTATUS can't be written
-    3 (reg! ppu OAM-ADDR value)
+    3 (set-reg! ppu OAM-ADDR value)
     4 (let [i (reg ppu OAM-ADDR)]
         (bytes/put! (:oam ppu) i value)
-        (reg! ppu OAM-ADDR (bit-and (inc i) 0xFF)))
+        (set-reg! ppu OAM-ADDR (bit-and (inc i) 0xFF)))
     5 (if (zero? (reg ppu W))
-        (do (reg! ppu T (after-scroll-x (reg ppu T) value))
-            (reg! ppu X (bit-and value 7))
-            (reg! ppu W 1))
-        (do (reg! ppu T (after-scroll-y (reg ppu T) value))
-            (reg! ppu W 0)))
+        (do (set-reg! ppu T (after-scroll-x (reg ppu T) value))
+            (set-reg! ppu X (bit-and value 7))
+            (set-reg! ppu W 1))
+        (do (set-reg! ppu T (after-scroll-y (reg ppu T) value))
+            (set-reg! ppu W 0)))
     6 (if (zero? (reg ppu W))
-        (do (reg! ppu T (after-address-high (reg ppu T) value))
-            (reg! ppu W 1))
+        (do (set-reg! ppu T (after-address-high (reg ppu T) value))
+            (set-reg! ppu W 1))
         (let [t (after-address-low (reg ppu T) value)]
-          (reg! ppu T t)
-          (reg! ppu V t)
-          (reg! ppu W 0)))
+          (set-reg! ppu T t)
+          (set-reg! ppu V t)
+          (set-reg! ppu W 0)))
     7 (write-data! ppu mem value))
   nil)

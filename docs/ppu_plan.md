@@ -182,6 +182,10 @@ What it's for:
 
 ### Step 3: the dot-stepped PPU (`nes.ppu.core`)
 
+*Done: `nes.ppu.core`. The whole-frame renderer's overflow count was
+corrected on the way: the PPU looks for sprites whenever drawing is on,
+shown or not, and on line 239 looks for line 240's.*
+
 `(tick! ppu cart)` moves the PPU one dot. Per frame, by line:
 
 | Lines | What happens |
