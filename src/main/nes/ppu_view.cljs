@@ -4,6 +4,7 @@
   (:require [nes.console :as console]
             [nes.cpu.disasm :refer [hex]]
             [nes.emulator :as emu]
+            [nes.ppu.registers :as ppu-registers]
             [nes.registers :as registers]
             [nes.state :refer [db]]))
 
@@ -59,6 +60,75 @@
         "Read here without side effects (a real read clears the vblank bit).")]]))
 
 ;; ---------------------------------------------------------------------------
+;; The scroll registers: v, t, x and w
+
+(defn- address-bits
+  "A 15-bit v or t as boxes, bit 14 first, tinted by field."
+  [v]
+  (let [color-of (into {} (for [[i {:keys [bits]}] (map-indexed vector ppu-registers/v-fields)
+                                b bits]
+                            [b (nth field-colors i)]))]
+    [:div {:style {:display "flex" :gap "2px" :flex-wrap "wrap"}}
+     (for [b (range 14 -1 -1)
+           :let [on? (bit-test v b)]]
+       ^{:key b}
+       [:div {:style {:text-align "center"}}
+        [:div {:style (merge muted mono {:font-size "10px"})} b]
+        [:div {:style (merge mono {:width "17px" :height "24px" :line-height "24px"
+                                   :border "1px solid #d0d7de" :border-radius "3px"
+                                   :background (color-of b)
+                                   :font-weight (when on? "bold")
+                                   :color (if on? "#24292f" "#8c959f")})}
+         (if on? 1 0)]])]))
+
+(defn- address-card [label about v x]
+  (let [parts (ppu-registers/fields v)
+        {px :x py :y} (ppu-registers/scroll-position v x)]
+    [:div {:style {:border "1px solid #d0d7de" :border-radius "6px" :padding "10px 12px"
+                   :min-width "300px" :flex "1"}}
+     [:div {:style {:display "flex" :justify-content "space-between" :align-items "baseline"
+                    :gap "8px" :margin-bottom "4px"}}
+      [:div [:strong label] " " [:span {:style muted} about]]
+      [:div {:style mono} (hex v 4)]]
+     [address-bits v]
+     [:table {:style {:border-collapse "collapse" :font-size "13px" :margin-top "8px" :width "100%"}}
+      [:tbody
+       (for [[i {:keys [key name bits about]}] (map-indexed vector ppu-registers/v-fields)]
+         ^{:key name}
+         [:tr {:title about :style {:border-top "1px solid #eaeef2"}}
+          [:td {:style {:padding "3px 6px" :white-space "nowrap" :background (nth field-colors i)}}
+           [:span {:style (merge muted mono {:font-size "11px"})} (str (first bits) "–" (last bits))]]
+          [:td {:style {:padding "3px 8px"}} name]
+          [:td {:style (merge mono {:padding "3px 0"})} (get parts key)]])]]
+     [:div {:style (merge muted {:font-size "12px" :margin-top "6px"})}
+      "As an address: " [:span {:style mono} (hex (bit-and v 0x3FFF) 4)]
+      ". As a scroll position, with fine X: " [:span {:style mono} px ", " py] "."]]))
+
+(defn- scroll-registers [e]
+  (let [{:keys [v t x w]} (emu/ppu-scroll e)]
+    [:div {:style {:margin-bottom "16px"}}
+     [:h4 {:style {:margin "0 0 6px"}} "Inside the PPU: v, t, x and w"]
+     [:p {:style (merge muted {:margin-top 0 :font-size "13px"})}
+      "Scrolling and video memory addresses share four registers the CPU can't "
+      "see. The game writes " [:span {:style mono} "t"] " (through PPUSCROLL, PPUADDR "
+      "and PPUCTRL), and the PPU copies it to " [:span {:style mono} "v"]
+      ", the address it's reading the background from, as it draws. Hover over a row "
+      "for what it means."]
+     [:div {:style {:display "flex" :gap "12px" :flex-wrap "wrap" :margin-bottom "8px"}}
+      [address-card "v" "the current address" v x]
+      [address-card "t" "the one being set up" t x]]
+     [:div {:style (merge mono {:font-size "13px"})}
+      "x " x [:span {:style muted} " (fine X scroll: the pixel within the tile, 0–7)"]]
+     [:div {:style (merge mono {:font-size "13px"})}
+      "w " w [:span {:style muted}
+              (if (zero? w)
+                " (the next PPUSCROLL or PPUADDR write is the first of two)"
+                " (the next PPUSCROLL or PPUADDR write is the second of two)")]]
+     [:p {:style (merge muted {:font-size "12px"})}
+      "jsnes draws a line at a time, so while the picture is being drawn its "
+      [:span {:style mono} "v"] " follows its own renderer, not a real PPU's dot by dot."]]))
+
+;; ---------------------------------------------------------------------------
 ;; Where the PPU is in the frame
 
 (defn- beam-diagram
@@ -106,6 +176,7 @@
         (for [k [:ctrl :mask :status]
               :let [spec (registers/bit-fields k)]]
           ^{:key k} [register-card spec ({:ctrl ctrl :mask mask :status status} k)])]
+       [scroll-registers e]
        [:h4 {:style {:margin "0 0 6px"}} "Where the PPU is"]
        [:div {:style (merge mono {:font-size "13px" :margin-bottom "6px"})}
         "Frame " frame " · scanline " scanline " · dot " dot]

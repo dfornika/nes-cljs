@@ -69,6 +69,11 @@
     plus `:frame` (frames since the cartridge was loaded), and `:scroll`,
     {:x :y}: where in the 512x480 space of the four nametables the top-left
     of the picture was this frame, as of the first visible line.")
+  (ppu-scroll [emu]
+    "The PPU's scroll and address registers, as numbers: `:v` (the current
+    video memory address, 15 bits), `:t` (the one being set up), `:x` (fine
+    X scroll, 0-7) and `:w` (0 or 1: which of the two writes to $2005 or
+    $2006 is next). See nes.ppu.registers.")
   (oam [emu]
     "The PPU's sprite memory (OAM, 'object attribute memory') as a
     256-byte array: 64 sprites of 4 bytes each (Y, tile, attributes, X).")

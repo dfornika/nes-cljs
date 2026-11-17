@@ -111,6 +111,9 @@ Each step is a pull request that stands on its own, with tests.
 
 ### Step 1: registers and the scroll model (`nes.ppu.registers`)
 
+*Done: `nes.ppu.registers` and `nes.ppu.memory`, the v/t/x/w view in the
+PPU tab, and a test against jsnes's registers.*
+
 The CPU sees 8 registers, $2000-$2007, repeated up to $3FFF. Behind
 them, the scroll and address state is four internal registers, named by
 the nesdev wiki after the person who worked them out ("loopy"):
