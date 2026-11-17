@@ -12,6 +12,7 @@
             [nes.cpu.disasm :as disasm]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
+            [nes.emulator.machine :as machine]
             [nes.rom :as rom]
             [nes.screen :as screen]
             [nes.state :refer [db]]
@@ -30,6 +31,13 @@
 ;; Which CPU runs the game: :jsnes or :cljs (see nes.emulator/CpuChoice),
 ;; kept for ROMs loaded later.
 (defonce ^:private cpu-choice (atom :jsnes))
+
+;; Which emulator runs the game: :jsnes, or :nes-cljs (NES.cljs's own
+;; console, nes.machine: our CPU and PPU). Kept for ROMs loaded later.
+(defonce ^:private machine-choice (atom :jsnes))
+
+;; The ROM loaded last, as loaded, so switching emulators can load it again
+(defonce ^:private last-rom (atom nil))
 
 (defn emulator-instance
   "The current emulator, for poking at from the REPL."
@@ -463,9 +471,10 @@
   `rom-name` is just for display."
   [rom-name ^js bytes]
   (pause!)
+  (reset! last-rom {:name rom-name :bytes bytes})
   (if-let [header (rom/parse-header bytes)]
     (try
-      (let [e (jsnes/create {:on-frame screen/draw!})]
+      (let [e ((if (= @machine-choice :nes-cljs) machine/create jsnes/create) {:on-frame screen/draw!})]
         (emu/set-audio-sink! e on-audio-sample)
         (emu/load-rom! e bytes)
         (emu/monitor-bus! e @bus-monitor?)
@@ -489,6 +498,20 @@
         (swap! db assoc :rom nil :status :empty
                :error (str "Couldn't load " rom-name ": " (ex-message err)))))
     (swap! db assoc :error (str rom-name " isn't an iNES (.nes) file."))))
+
+(defn use-machine!
+  "Run games on :jsnes or :nes-cljs (NES.cljs's own console), now and for
+  ROMs loaded later. The game loaded now starts again from power on."
+  [which]
+  (reset! machine-choice which)
+  (swap! db assoc :machine which)
+  (when-let [{:keys [name bytes]} @last-rom]
+    (load-bytes! name bytes)))
+
+(defn machine-in-use
+  "Which emulator runs games: :jsnes or :nes-cljs."
+  []
+  @machine-choice)
 
 (defn- strip-gz [name] (.replace name (js/RegExp. "\\.gz$" "i") ""))
 

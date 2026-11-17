@@ -174,6 +174,11 @@
 (def ^:const SPRITE-0-HIT 0x40)
 (def ^:const OVERFLOW 0x20)
 
+;; A record rather than a map, so looking up its parts is quick: the PPU
+;; that draws (nes.ppu.core) does it millions of times a second, and fills
+;; in the fields after :palette.
+(defrecord PPU [regs oam palette core secondary units picture])
+
 (defn create
   "A PPU's registers and its own memories, as at power on (all zero):
 
@@ -181,9 +186,9 @@
     :oam      sprite memory: 64 sprites of 4 bytes
     :palette  palette RAM: 32 bytes of color numbers"
   []
-  {:regs (bytes/make-words 10)
-   :oam (bytes/make 256)
-   :palette (bytes/make 32)})
+  (map->PPU {:regs (bytes/make-words 10)
+             :oam (bytes/make 256)
+             :palette (bytes/make 32)}))
 
 (defn reg "The register at index `i` of `ppu`'s registers." [ppu i] (bytes/word-at (:regs ppu) i))
 (defn set-reg! "Set the register at index `i` of `ppu`'s registers." [ppu i value] (bytes/put-word! (:regs ppu) i value))

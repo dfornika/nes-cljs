@@ -57,9 +57,11 @@
     but jsnes uses all 15, so a read meant for $0020 lands in its palette
     code.
   - $3F20-$3FFF: the palette repeats every 32 bytes, with $3F10 the same
-    as $3F00 each time, and jsnes's table of repeats doesn't do that."
+    as $3F00 each time, and jsnes's table of repeats doesn't do that.
+  - $3000-$3EFF: a repeat of $2000-$2EFF, mirroring and all, but jsnes's
+    table sends it to $2000-$2EFF without the mirroring."
   [v]
-  (or (bit-test v 14) (<= 0x3F20 v 0x3FFF)))
+  (or (bit-test v 14) (<= 0x3F20 v 0x3FFF) (<= 0x3000 v 0x3EFF)))
 
 (defn- run-both!
   "Do `ops` to both. Returns [what ours read, what jsnes read]."
