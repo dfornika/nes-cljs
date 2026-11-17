@@ -255,6 +255,19 @@
        :dot (.-curX ppu)
        :frame (.-frames state)
        :scroll {:x (.-scrollX state) :y (.-scrollY state)}}))
+  (ppu-scroll [_]
+    ;; jsnes keeps v and t in pieces: the "counters" (cnt...) are v, the
+    ;; "registers" (reg...) are t. While it draws, its counters follow its
+    ;; own renderer, which draws a line at a time.
+    (let [^js ppu (.-ppu nes)
+          pack (fn [fv vv h vt ht]
+                 (bit-or (bit-shift-left (bit-and fv 7) 12) (bit-shift-left (bit-and vv 1) 11)
+                         (bit-shift-left (bit-and h 1) 10) (bit-shift-left (bit-and vt 31) 5)
+                         (bit-and ht 31)))]
+      {:v (pack (.-cntFV ppu) (.-cntV ppu) (.-cntH ppu) (.-cntVT ppu) (.-cntHT ppu))
+       :t (pack (.-regFV ppu) (.-regV ppu) (.-regH ppu) (.-regVT ppu) (.-regHT ppu))
+       :x (.-regFH ppu)
+       :w (if (.-firstWrite ppu) 0 1)}))
   (oam [_] (.. nes -ppu -spriteMem))
   (ppu-flags [_]
     (let [^js ppu (.-ppu nes)]

@@ -14,4 +14,8 @@
           :test {:target :node-test
                  :output-to "target/test/test.js"
                  :ns-regexp "-test$"
+                 ;; bundle npm packages, as the browser build does: Node loads
+                 ;; jsnes's bundle as an ES module (its package says "type":
+                 ;; "module") and gets nothing from it
+                 :js-options {:js-provider :shadow}
                  :autorun true}}}

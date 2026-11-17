@@ -29,8 +29,10 @@ committed to; pick whatever looks fun.
   with a diagram of where the PPU is in the frame
 - [x] **Partial frames while stepping** – show the picture as far as the PPU has drawn
   it, with a marker at the current scanline and dot; **Step line** button, `(line!)`
-- [ ] **PPU internals** – the v / t / x / w scroll registers, and a log of PPU register
-  writes with the scanline they happened on
+- [x] **PPU internals: v, t, x and w** – the scroll registers in the PPU tab, bit by bit
+  (`emu/ppu-scroll`, decoded with `nes.ppu.registers`)
+- [ ] **A log of PPU register writes** with the scanline and dot they happened on (see
+  `docs/ppu_plan.md`, step 8: easier with our own PPU)
 - [ ] **Mapper / bank view** – which PRG and CHR banks are switched in right now
 
 ## REPL-driven development
@@ -181,6 +183,12 @@ played. So combine them.
 - [ ] **A ClojureScript PPU**, then a whole console behind the `Emulator` protocol. A plan,
   step by step, in `docs/ppu_plan.md`: portable `.cljc`, by the dot, with a whole-frame
   renderer as its test oracle; first milestone, our own games running on our own console
+  - [x] **Step 1: registers and scroll** – `nes.ppu.registers` (the eight registers, v/t/x/w)
+    and `nes.ppu.memory` (where PPU addresses lead, mirroring). Checked against jsnes with
+    random register accesses (`nes.ppu.jsnes-compare-test`), which found three places jsnes
+    differs from the hardware: $2004/$2007 reads don't refresh its bus latch, it uses 15 bits
+    of v as the address (not 14), and its palette doesn't repeat right at $3F20-$3FFF
+  - [ ] **Step 2: a whole-frame renderer** – next; see the plan
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,
   overclocking without changing what's on screen, other master palettes), then a "meta-NES
   mapper" (per-tile palettes, a multiplier, more sprites, extra sound), and perhaps one day a
