@@ -154,6 +154,9 @@ This step pays for itself at once: the PPU tab can show v, t, x and w
 
 ### Step 2: a whole-frame renderer (`nes.ppu.render`)
 
+*Done: `nes.ppu.render`, unit tests for each rule, and a comparison with
+jsnes's pictures of our five games. The tabs don't use it yet.*
+
 A pure function: PPU memory, OAM and registers in, a frame of palette
 indexes out. No timing. Each line is drawn from the scroll position as it
 was at the start of the frame. Most of it exists already: `nes.chr`

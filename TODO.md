@@ -188,7 +188,15 @@ played. So combine them.
     random register accesses (`nes.ppu.jsnes-compare-test`), which found three places jsnes
     differs from the hardware: $2004/$2007 reads don't refresh its bus latch, it uses 15 bits
     of v as the address (not 14), and its palette doesn't repeat right at $3F20-$3FFF
-  - [ ] **Step 2: a whole-frame renderer** – next; see the plan
+  - [x] **Step 2: a whole-frame renderer** – `nes.ppu.render`: a frame of palette indexes from
+    memory, OAM and registers, walking v with step 1's increments. Its pictures of all five of
+    our games match jsnes's pixel for pixel (`nes.ppu.render-jsnes-test`), apart from two
+    places jsnes differs from a PPU: it blacks out the left 8 pixels when either layer is
+    hidden there, and it draws 32 tiles a line, so with fine X scroll the last few pixels on
+    the right are backdrop (a PPU draws a 33rd tile)
+  - [ ] **Step 3: the dot-stepped PPU** – next; see the plan
+  - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
+    memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,
   overclocking without changing what's on screen, other master palettes), then a "meta-NES
   mapper" (per-tile palettes, a multiplier, more sprites, extra sound), and perhaps one day a
