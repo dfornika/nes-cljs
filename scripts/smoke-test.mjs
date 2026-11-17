@@ -175,6 +175,21 @@ try {
     check(true, `Star Run: running right moves the camera (x ${moved})`);
   });
 
+  await step("NES.cljs's own console", async () => {
+    // Switch the game to our own CPU and PPU: it starts again, and runs.
+    await page.click('button:text-is("CPU")');
+    await page.locator('input[name="machine"]').nth(1).click();
+    await page.waitForSelector('text=/nes\\.machine/');
+    await page.click('button:text-is("PPU")');
+    const f0 = await frame();
+    const f1 = await until(async () => { const f = await frame(); return f > f0 + 10 && f; });
+    const colors = await until(async () => { const n = await colorsOnScreen(); return n > 3 && n; });
+    check(true, `NES.cljs's own console runs Star Run (frame ${f0} → ${f1}, ${colors} colors)`);
+    await page.click('button:text-is("CPU")');
+    await page.locator('input[name="machine"]').nth(0).click();
+    await page.waitForSelector('text=/jsnes is a JavaScript emulator/');
+  });
+
   await step('Star Tower plays', async () => {
     // Ladders: walk to one, hold Up, and the player is climbing.
     await page.click('button:text-is("Sample ROMs ▾")');

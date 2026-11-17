@@ -6,11 +6,13 @@
 
     lines 0-239   the picture: a pixel out on each of dots 1-256
     line 240      idle
-    line 241      dot 1: vertical blank starts (PPUSTATUS bit 7; an NMI if
-                  PPUCTRL bit 7 is on)
+    line 241      vertical blank starts (PPUSTATUS bit 7; an NMI if PPUCTRL
+                  bit 7 is on), as dot 1 begins: a read on dot 1 sees it,
+                  and a read just before it means it isn't set this frame
     lines 242-260 vertical blank: the CPU's time to change video memory
-    line 261      'pre-render': dot 1 clears vertical blank, sprite 0 hit
-                  and overflow; it fetches like a visible line, to get the
+    line 261      'pre-render': as dot 1 begins, vertical blank, sprite 0
+                  hit and overflow are cleared; it fetches like a visible
+                  line, to get the
                   first two tiles of line 0 ready, and copies the vertical
                   scroll from t to v (dots 280-304). On odd frames, with
                   drawing on, its last dot is skipped.
@@ -74,12 +76,17 @@
 (def ^:const FOUND-0 12)  ; 1 if sprite 0 is one of them
 (def ^:const UNITS 13)    ; sprites loaded for this line
 (def ^:const UNITS-0 14)  ; 1 if the first is sprite 0
+(def ^:const ARMED 15)    ; 1 once line 240 has passed: vertical blank comes next
+(def ^:const SUPPRESS 16) ; 1 if PPUSTATUS was read just before vertical blank
+(def ^:const SKIP-ODD 17) ; 1 (as on a real NES) to skip a dot on odd frames
 
 (defn create
   "A PPU at power on. It starts on the pre-render line, so the first `tick!`s
-  get the first frame ready. (A real one starts somewhere else each time.)"
+  get the first frame ready. (A real one starts somewhere else each time;
+  see `set-position!`.)"
   []
-  (let [core (bytes/make-words 15)]
+  (let [core (bytes/make-words 18)]
+    (bytes/put-word! core SKIP-ODD 1)
     (bytes/put-word! core LINE pre-render)
     (assoc (r/create)
            :core core
@@ -96,6 +103,23 @@
   [ppu]
   {:scanline (c ppu LINE) :dot (c ppu DOT) :frame (c ppu FRAME)})
 
+(defn set-position!
+  "Move the PPU to `line`, `dot`, as if it had started there. It won't
+  start vertical blank until it has been through line 240."
+  [ppu line dot]
+  (c! ppu LINE line)
+  (c! ppu DOT dot)
+  (c! ppu ARMED 0))
+
+(defn skip-odd-dot!
+  "Skip the last dot of the pre-render line on odd frames while drawing,
+  as a real NES does (`on?` true, the default), or not."
+  [ppu on?]
+  (c! ppu SKIP-ODD (if on? 1 0)))
+
+(defn line "The line the PPU is on, 0-261." [ppu] (c ppu LINE))
+(defn dot "The next dot `tick!` will do, 0-340." [ppu] (c ppu DOT))
+
 (defn drawing?
   "Is drawing on (the background, the sprites, or both)?"
   [ppu]
@@ -105,51 +129,52 @@
   "Is the PPU drawing, or getting ready to, right now? Then v is busy, and
   some registers behave differently."
   [ppu]
-  (and (drawing? ppu) (let [line (c ppu LINE)] (or (< line 240) (= line pre-render)))))
+  (and (drawing? ppu) (let [line (c ppu LINE)] (or (< line 240) (== line pre-render)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The background
 
 (defn- reload!
   "Put the fetched tile into the low halves of the shift registers."
-  [ppu]
-  (let [at (c ppu AT)]
-    (c! ppu BG-LO (bit-or (bit-and (c ppu BG-LO) 0xFF00) (c ppu LO)))
-    (c! ppu BG-HI (bit-or (bit-and (c ppu BG-HI) 0xFF00) (c ppu HI)))
-    (c! ppu AT-LO (bit-or (bit-and (c ppu AT-LO) 0xFF00) (if (bit-test at 0) 0xFF 0)))
-    (c! ppu AT-HI (bit-or (bit-and (c ppu AT-HI) 0xFF00) (if (bit-test at 1) 0xFF 0)))))
+  [core]
+  (let [at (bytes/word-at core AT)]
+    (bytes/put-word! core BG-LO (bit-or (bit-and (bytes/word-at core BG-LO) 0xFF00) (bytes/word-at core LO)))
+    (bytes/put-word! core BG-HI (bit-or (bit-and (bytes/word-at core BG-HI) 0xFF00) (bytes/word-at core HI)))
+    (bytes/put-word! core AT-LO (bit-or (bit-and (bytes/word-at core AT-LO) 0xFF00) (if (bit-test at 0) 0xFF 0)))
+    (bytes/put-word! core AT-HI (bit-or (bit-and (bytes/word-at core AT-HI) 0xFF00) (if (bit-test at 1) 0xFF 0)))))
 
-(defn- shift! [ppu]
-  (doseq [i [BG-LO BG-HI AT-LO AT-HI]]
-    (c! ppu i (bit-and (bit-shift-left (c ppu i) 1) 0xFFFF))))
+(defn- shift! [core]
+  (bytes/put-word! core BG-LO (bit-and (bit-shift-left (bytes/word-at core BG-LO) 1) 0xFFFF))
+  (bytes/put-word! core BG-HI (bit-and (bit-shift-left (bytes/word-at core BG-HI) 1) 0xFFFF))
+  (bytes/put-word! core AT-LO (bit-and (bit-shift-left (bytes/word-at core AT-LO) 1) 0xFFFF))
+  (bytes/put-word! core AT-HI (bit-and (bit-shift-left (bytes/word-at core AT-HI) 1) 0xFFFF)))
 
 (defn- background-dot!
-  "This dot's work on the background, while drawing."
-  [ppu mem line dot]
-  (let [fetching? (or (<= 1 dot 256) (<= 321 dot 336))]
-    (when (or (<= 2 dot 257) (<= 322 dot 337))
-      (shift! ppu)
-      (when (and (= 1 (bit-and dot 7)) (>= dot 9))   ; 9, 17 ... 257, 329, 337
-        (reload! ppu)))
-    (when fetching?
-      (let [v (r/reg ppu r/V)]
-        (case (int (bit-and dot 7))
-          2 (c! ppu NT (memory/video-read mem (bit-or 0x2000 (bit-and v 0x0FFF))))
-          4 (let [attr (memory/video-read mem (bit-or 0x23C0 (bit-and v 0x0C00)
-                                                      (bit-and (bit-shift-right v 4) 0x38)
-                                                      (bit-and (bit-shift-right v 2) 0x07)))
-                  shift (bit-or (bit-and (bit-shift-right v 4) 4) (bit-and v 2))]
-              (c! ppu AT (bit-and (bit-shift-right attr shift) 3)))
-          6 (c! ppu LO (memory/video-read mem (+ (if (bit-test (r/reg ppu r/CTRL) 4) 0x1000 0)
-                                                 (* 16 (c ppu NT)) (r/fine-y v))))
-          0 (do (c! ppu HI (memory/video-read mem (+ (if (bit-test (r/reg ppu r/CTRL) 4) 0x1000 0)
-                                                     (* 16 (c ppu NT)) (r/fine-y v) 8)))
-                (r/set-reg! ppu r/V (r/increment-x v)))
-          nil)))
-    (when (= dot 256) (r/set-reg! ppu r/V (r/increment-y (r/reg ppu r/V))))
-    (when (= dot 257) (r/set-reg! ppu r/V (r/copy-x (r/reg ppu r/V) (r/reg ppu r/T))))
-    (when (and (= line pre-render) (<= 280 dot 304))
-      (r/set-reg! ppu r/V (r/copy-y (r/reg ppu r/V) (r/reg ppu r/T))))))
+  "This dot's work on the background, while drawing. `core` and `regs` are
+  the PPU's arrays (passed in, as this runs every dot)."
+  [core regs mem line dot]
+  (when (or (<= 2 dot 257) (<= 322 dot 337))
+    (shift! core)
+    (when (and (== 1 (bit-and dot 7)) (>= dot 9))   ; 9, 17 ... 257, 329, 337
+      (reload! core)))
+  (when (or (<= 1 dot 256) (<= 321 dot 336))
+    (let [v (bytes/word-at regs r/V)
+          table (if (bit-test (bytes/word-at regs r/CTRL) 4) 0x1000 0)]
+      (case (int (bit-and dot 7))
+        2 (bytes/put-word! core NT (memory/video-read mem (bit-or 0x2000 (bit-and v 0x0FFF))))
+        4 (let [attr (memory/video-read mem (bit-or 0x23C0 (bit-and v 0x0C00)
+                                                    (bit-and (bit-shift-right v 4) 0x38)
+                                                    (bit-and (bit-shift-right v 2) 0x07)))
+                shift (bit-or (bit-and (bit-shift-right v 4) 4) (bit-and v 2))]
+            (bytes/put-word! core AT (bit-and (bit-shift-right attr shift) 3)))
+        6 (bytes/put-word! core LO (memory/video-read mem (+ table (* 16 (bytes/word-at core NT)) (r/fine-y v))))
+        0 (do (bytes/put-word! core HI (memory/video-read mem (+ table (* 16 (bytes/word-at core NT)) (r/fine-y v) 8)))
+              (bytes/put-word! regs r/V (r/increment-x v)))
+        nil)))
+  (when (== dot 256) (bytes/put-word! regs r/V (r/increment-y (bytes/word-at regs r/V))))
+  (when (== dot 257) (bytes/put-word! regs r/V (r/copy-x (bytes/word-at regs r/V) (bytes/word-at regs r/T))))
+  (when (and (== line pre-render) (<= 280 dot 304))
+    (bytes/put-word! regs r/V (r/copy-y (bytes/word-at regs r/V) (bytes/word-at regs r/T)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Sprites
@@ -163,12 +188,12 @@
   (let [oam (:oam ppu), secondary (:secondary ppu), h (sprite-height ppu)]
     (bytes/fill! secondary 0xFF)
     (loop [i 0, found 0, zero 0]
-      (if (= i 64)
+      (if (== i 64)
         (do (c! ppu FOUND (min found 8)) (c! ppu FOUND-0 zero))
         (if (< -1 (- line (bytes/at oam (* 4 i))) h)
           (do (when (< found 8)
                 (dotimes [k 4] (bytes/put! secondary (+ (* 4 found) k) (bytes/at oam (+ (* 4 i) k)))))
-              (when (= found 8) (r/set-status! ppu r/OVERFLOW true))
+              (when (== found 8) (r/set-status! ppu r/OVERFLOW true))
               (recur (inc i) (inc found) (if (zero? i) 1 zero)))
           (recur (inc i) found zero))))))
 
@@ -185,7 +210,7 @@
         attr (if used? (bytes/at secondary (+ 2 (* 4 k))) 0)
         row (if used? (- line y) 0)
         row (if (bit-test attr 7) (- h 1 row) row)
-        addr (if (= h 16)
+        addr (if (== h 16)
                (+ (* (bit-and tile 1) 0x1000) (* (+ (bit-and tile 0xFE) (if (< row 8) 0 1)) 16) (bit-and row 7))
                (+ (if (bit-test (r/reg ppu r/CTRL) 3) 0x1000 0) (* tile 16) row))
         lo (memory/video-read mem addr)
@@ -199,54 +224,64 @@
 (defn- sprite-dot!
   "This dot's work on sprites, while drawing."
   [ppu mem line dot]
-  (when (and (= dot 65) (< line 240)) (find-sprites! ppu line))
+  (when (and (== dot 65) (< line 240)) (find-sprites! ppu line))
   (when (<= 257 dot 320)
     (r/set-reg! ppu r/OAM-ADDR 0)
-    (when (= dot 257)
+    (when (== dot 257)
       ;; nothing is searched on the pre-render line, so nothing is on line 0
-      (c! ppu UNITS (if (= line pre-render) 0 (c ppu FOUND)))
-      (c! ppu UNITS-0 (if (= line pre-render) 0 (c ppu FOUND-0))))
+      (c! ppu UNITS (if (== line pre-render) 0 (c ppu FOUND)))
+      (c! ppu UNITS-0 (if (== line pre-render) 0 (c ppu FOUND-0))))
     (when (zero? (bit-and dot 7))   ; 264, 272 ... 320: the end of each unit's 8 dots
       (fetch-sprite! ppu mem line (bit-shift-right (- dot 264) 3)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The pixel
 
+(defn- sprite-at
+  "The first sprite unit with an opaque pixel at `x`, as unit*8 + color,
+  or -1. (Units are in sprite order, so the first one wins.)"
+  [core units x]
+  (loop [k 0]
+    (if (< k (bytes/word-at core UNITS))
+      (let [col (- x (bytes/at units (* 4 k)))]
+        (if (< -1 col 8)
+          (let [attr (bytes/at units (+ 1 (* 4 k)))
+                b (if (bit-test attr 6) col (- 7 col))
+                color (bit-or (bit-and (bit-shift-right (bytes/at units (+ 2 (* 4 k))) b) 1)
+                              (bit-shift-left (bit-and (bit-shift-right (bytes/at units (+ 3 (* 4 k))) b) 1) 1))]
+            (if (pos? color) (+ (* k 8) color) (recur (inc k))))
+          (recur (inc k))))
+      -1)))
+
 (defn- pixel!
   "Pick the color of pixel `x` on `line`."
-  [ppu line x]
-  (let [mask (r/reg ppu r/MASK)
+  [ppu core regs line x]
+  (let [mask (bytes/word-at regs r/MASK)
         palette (:palette ppu)
         index
         (if-not (pos? (bit-and mask 0x18))
           ;; drawing off: the backdrop, or the palette entry v points to
-          (let [v (bit-and (r/reg ppu r/V) 0x3FFF)]
+          (let [v (bit-and (bytes/word-at regs r/V) 0x3FFF)]
             (if (>= v 0x3F00) (bit-and v 0x1F) 0))
-          (let [bit (- 15 (r/reg ppu r/X))
+          (let [bit (- 15 (bytes/word-at regs r/X))
                 bg (if (and (bit-test mask 3) (or (bit-test mask 1) (>= x 8)))
-                     (bit-or (bit-and (bit-shift-right (c ppu BG-LO) bit) 1)
-                             (bit-shift-left (bit-and (bit-shift-right (c ppu BG-HI) bit) 1) 1))
+                     (bit-or (bit-and (bit-shift-right (bytes/word-at core BG-LO) bit) 1)
+                             (bit-shift-left (bit-and (bit-shift-right (bytes/word-at core BG-HI) bit) 1) 1))
                      0)
-                bg-palette (bit-or (bit-and (bit-shift-right (c ppu AT-LO) bit) 1)
-                                   (bit-shift-left (bit-and (bit-shift-right (c ppu AT-HI) bit) 1) 1))
+                bg-palette (bit-or (bit-and (bit-shift-right (bytes/word-at core AT-LO) bit) 1)
+                                   (bit-shift-left (bit-and (bit-shift-right (bytes/word-at core AT-HI) bit) 1) 1))
                 units (:units ppu)
-                ;; the first unit with an opaque pixel here: [unit color attr], or nil
-                sprite (when (and (bit-test mask 4) (or (bit-test mask 2) (>= x 8)))
-                         (loop [k 0]
-                           (when (< k (c ppu UNITS))
-                             (let [col (- x (bytes/at units (* 4 k)))]
-                               (if (< -1 col 8)
-                                 (let [attr (bytes/at units (+ 1 (* 4 k)))
-                                       b (if (bit-test attr 6) col (- 7 col))
-                                       color (bit-or (bit-and (bit-shift-right (bytes/at units (+ 2 (* 4 k))) b) 1)
-                                                     (bit-shift-left (bit-and (bit-shift-right (bytes/at units (+ 3 (* 4 k))) b) 1) 1))]
-                                   (if (pos? color) [k color attr] (recur (inc k))))
-                                 (recur (inc k)))))))]
-            (when (and sprite (pos? bg) (zero? (first sprite)) (= 1 (c ppu UNITS-0)) (< x 255))
-              (r/set-status! ppu r/SPRITE-0-HIT true))
+                found (if (and (bit-test mask 4) (or (bit-test mask 2) (>= x 8)))
+                        (sprite-at core units x)
+                        -1)
+                unit (bit-shift-right found 3)
+                color (bit-and found 3)
+                attr (when (>= found 0) (bytes/at units (+ 1 (* 4 unit))))]
+            (when (and (>= found 0) (pos? bg) (zero? unit) (== 1 (bytes/word-at core UNITS-0)) (< x 255))
+              (bytes/put-word! regs r/STATUS (bit-or (bytes/word-at regs r/STATUS) r/SPRITE-0-HIT)))
             (cond
-              (and sprite (or (zero? bg) (not (bit-test (nth sprite 2) 5))))
-              (bit-or 0x10 (bit-shift-left (bit-and (nth sprite 2) 3) 2) (nth sprite 1))
+              (and (>= found 0) (or (zero? bg) (not (bit-test attr 5))))
+              (bit-or 0x10 (bit-shift-left (bit-and attr 3) 2) color)
               (pos? bg) (bit-or (bit-shift-left bg-palette 2) bg)
               :else 0)))]
     (bytes/put-word! (:picture ppu) (+ (* line width) x)
@@ -258,36 +293,51 @@
 ;; Ticking
 
 (defn tick!
-  "Run the PPU for one dot. `mem` is its video memory (nes.ppu.memory)."
+  "Run the PPU for one dot. `mem` is its video memory (nes.ppu.memory).
+  Returns :vblank when vertical blank starts (the picture is finished),
+  :pre-render when it ends, otherwise nil."
   [ppu mem]
-  (let [line (c ppu LINE)
-        dot (c ppu DOT)
-        drawing (drawing? ppu)]
-    (when (= dot 1)
-      (cond
-        (= line vblank-line) (r/set-status! ppu r/VBLANK true)
-        (= line pre-render) (doseq [bit [r/VBLANK r/SPRITE-0-HIT r/OVERFLOW]] (r/set-status! ppu bit false))))
-    (when (and drawing (or (< line 240) (= line pre-render)))
-      (background-dot! ppu mem line dot)
-      (sprite-dot! ppu mem line dot))
+  (let [core (:core ppu)
+        regs (:regs ppu)
+        line (bytes/word-at core LINE)
+        dot (bytes/word-at core DOT)
+        drawing (pos? (bit-and (bytes/word-at regs r/MASK) 0x18))
+        event (when (zero? dot)
+                (cond
+                  (== line 240) (do (c! ppu ARMED 1) nil)
+                  ;; at the end of dot 0, so it's there as dot 1 begins
+                  (and (== line vblank-line) (== 1 (c ppu ARMED)))
+                  (do (c! ppu ARMED 0)
+                      (when (zero? (c ppu SUPPRESS)) (r/set-status! ppu r/VBLANK true))
+                      (c! ppu SUPPRESS 0)
+                      :vblank)
+                  (== line pre-render)
+                  (do (r/set-status! ppu r/VBLANK false)
+                      (r/set-status! ppu r/SPRITE-0-HIT false)
+                      (r/set-status! ppu r/OVERFLOW false)
+                      :pre-render)))]
+    (when (and drawing (or (< line 240) (== line pre-render)))
+      (background-dot! core regs mem line dot)
+      (when (or (== dot 65) (<= 257 dot 320))
+        (sprite-dot! ppu mem line dot)))
     (when (and (< line 240) (<= 1 dot 256))
-      (pixel! ppu line (dec dot)))
+      (pixel! ppu core regs line (dec dot)))
     ;; on to the next dot
     (cond
       ;; odd frames are a dot short when drawing: the last of the pre-render line is skipped
-      (and (= line pre-render) (= dot 339) drawing (odd? (c ppu FRAME)))
-      (do (c! ppu LINE 0) (c! ppu DOT 0) (c! ppu FRAME (inc (c ppu FRAME))))
-      (< dot 340) (c! ppu DOT (inc dot))
-      (< line pre-render) (do (c! ppu DOT 0) (c! ppu LINE (inc line)))
-      :else (do (c! ppu DOT 0) (c! ppu LINE 0) (c! ppu FRAME (inc (c ppu FRAME)))))
-    nil))
+      (and (== line pre-render) (== dot 339) drawing (odd? (bytes/word-at core FRAME)) (== 1 (bytes/word-at core SKIP-ODD)))
+      (do (bytes/put-word! core LINE 0) (bytes/put-word! core DOT 0) (bytes/put-word! core FRAME (inc (bytes/word-at core FRAME))))
+      (< dot 340) (bytes/put-word! core DOT (inc dot))
+      (< line pre-render) (do (bytes/put-word! core DOT 0) (bytes/put-word! core LINE (inc line)))
+      :else (do (bytes/put-word! core DOT 0) (bytes/put-word! core LINE 0) (bytes/put-word! core FRAME (inc (bytes/word-at core FRAME)))))
+    event))
 
 (defn run-to!
   "Tick until the PPU is at `line`, `dot` (the next dot to do). Returns the
   number of dots run."
   [ppu mem line dot]
   (loop [n 0]
-    (if (and (= line (c ppu LINE)) (= dot (c ppu DOT)))
+    (if (and (== line (c ppu LINE)) (== dot (c ppu DOT)))
       n
       (do (tick! ppu mem) (recur (inc n))))))
 
@@ -311,6 +361,9 @@
   - PPUDATA ($2007) moves v the way drawing does (a tile right and a line
     down) instead of by 1 or 32."
   [ppu mem addr]
+  ;; reading PPUSTATUS just before vertical blank starts: it doesn't, this frame
+  (when (and (= 2 (bit-and addr 7)) (= vblank-line (c ppu LINE)) (zero? (c ppu DOT)))
+    (c! ppu SUPPRESS 1))
   (if-not (drawing-now? ppu)
     (r/read! ppu mem addr)
     (case (int (bit-and addr 7))

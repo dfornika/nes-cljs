@@ -78,20 +78,32 @@
 (deftest vertical-blank
   (let [{:keys [ppu mem]} (quiet)]
     (r/set-reg! ppu r/CTRL 0x80)
-    (core/run-to! ppu mem 241 1)
-    (is (not (bit-test (r/reg ppu r/STATUS) 7)) "not yet: dot 1 hasn't happened")
+    (core/run-to! ppu mem 241 0)
+    (is (not (bit-test (r/reg ppu r/STATUS) 7)) "not yet")
     (is (not (r/nmi? ppu)))
-    (core/tick! ppu mem)
-    (is (bit-test (r/reg ppu r/STATUS) 7) "line 241, dot 1")
+    (is (= :vblank (core/tick! ppu mem)))
+    (is (bit-test (r/reg ppu r/STATUS) 7) "there as dot 1 of line 241 begins")
     (is (r/nmi? ppu) "and an NMI, with PPUCTRL bit 7 on")
-    (core/run-to! ppu mem 261 2)
-    (is (not (bit-test (r/reg ppu r/STATUS) 7)) "cleared on the pre-render line, dot 1")))
+    (core/run-to! ppu mem 261 1)
+    (is (not (bit-test (r/reg ppu r/STATUS) 7)) "cleared as dot 1 of the pre-render line begins"))
+  (testing "reading PPUSTATUS just before: no vertical blank this frame"
+    (let [{:keys [ppu mem]} (quiet)]
+      (core/run-to! ppu mem 241 0)
+      (core/cpu-read! ppu mem 0x2002)
+      (core/tick! ppu mem)
+      (is (not (bit-test (r/reg ppu r/STATUS) 7))))))
 
 (deftest frame-lengths
   (testing "drawing off: always 262 x 341 dots"
     (let [{:keys [ppu mem]} (quiet)]
       (core/run-to! ppu mem 241 1)
-      (is (= [89342 89342] (repeatedly 2 #(do (core/tick! ppu mem) (inc (core/run-to! ppu mem 241 1))))))))
+      (is (= [89342 89342] (repeatedly 2 #(do (core/tick! ppu mem) (inc (core/run-to! ppu mem 241 1)))))))
+    (testing "or with the odd frame's dot not skipped (as jsnes does)"
+      (let [{:keys [ppu mem]} (quiet)]
+        (core/skip-odd-dot! ppu false)
+        (r/set-reg! ppu r/MASK 0x08)
+        (core/run-to! ppu mem 241 1)
+        (is (= #{89342} (set (repeatedly 4 #(do (core/tick! ppu mem) (inc (core/run-to! ppu mem 241 1))))))))))
   (testing "drawing on: every other frame is a dot short"
     (let [{:keys [ppu mem]} (quiet)]
       (r/set-reg! ppu r/MASK 0x08)

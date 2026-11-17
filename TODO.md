@@ -201,7 +201,17 @@ played. So combine them.
     same sprite 0 hit and overflow; a scroll split works; our games' frames from jsnes's state
     match too. Not yet: the overflow flag's hardware bug, the PPUSTATUS-read race at the start
     of vertical blank, speed (about 38 ms a frame on the JVM; 16.7 is the budget)
-  - [ ] **Step 4: a console and mapper 0** – next; see the plan
+  - [x] **Step 4: a console and mapper 0** – `nes.machine` (our CPU and PPU, RAM, controllers,
+    sprite DMA, NMI) with `nes.cartridge` (mapper 0), and `nes.emulator.machine` for the app:
+    the CPU tab's "Run the game on: NES.cljs's own console". Our five games run on it in lockstep
+    with jsnes, same RAM and picture every frame (`nes.machine-test`). It starts, ends frames and
+    takes NMIs by jsnes's rules, so the two can be compared cycle for cycle. About 27 frames a
+    second in the browser so far. Two more jsnes differences found on the way: it never skips
+    the odd frame's dot, and its $3000-$3EFF ignores the cartridge's mirroring
+  - [ ] **Step 4 follow-ups** – our games' headless tests (`nes.cpu.harness`) on the real console,
+    so their NMI budgets are measured rather than estimated; the bus monitor and code/data log
+    for our console; remembering the emulator choice between visits
+  - [ ] **Step 5: compare with jsnes in the app** – next; see the plan
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,

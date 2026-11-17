@@ -286,7 +286,27 @@
         [:td {:style (merge muted {:padding "2px 0" :font-size "12px" :max-width "240px"})} about]])]]])
 
 ;; ---------------------------------------------------------------------------
-;; Which CPU
+;; Which emulator, and which CPU
+
+(defn- machine-choice []
+  (let [which (or (:machine @db) (console/machine-in-use))
+        option (fn [k label]
+                 [:label {:style {:margin-right "14px" :cursor "pointer"}}
+                  [:input {:type "radio" :name "machine" :checked (= which k)
+                           :on-change #(console/use-machine! k)}]
+                  " " label])]
+    [:div {:style {:border "1px solid #d0d7de" :border-radius "6px" :padding "8px 12px"
+                   :margin-bottom "10px" :font-size "13px"}}
+     [:div [:strong "Run the game on: "]
+      [option :jsnes "jsnes"]
+      [option :nes-cljs "NES.cljs's own console"]]
+     [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
+      (if (= which :nes-cljs)
+        [:span "Our 6502 (" [:span {:style mono} "nes.cpu.core"] ") and our PPU ("
+         [:span {:style mono} "nes.ppu.core"] ", one dot at a time), wired together in "
+         [:span {:style mono} "nes.machine"] ". No sound yet, cartridges with mapper 0 only, "
+         "and slower than jsnes: it's written to be read, not yet to be fast."]
+        "jsnes is a JavaScript emulator, with sound and many cartridge types. Switching starts the game again from power on.")]]))
 
 (defn- cpu-choice
   "`_tick` is the inspector tick, so the counts here refresh."
@@ -337,7 +357,9 @@
           {:keys [scanline dot frame]} (emu/ppu-state emulator)
           paused? (= :paused (:status @db))]
       [:div
-       [cpu-choice emulator @console/inspect-tick]
+       [machine-choice]
+       (when-not (= :nes-cljs (console/machine-in-use))
+         [cpu-choice emulator @console/inspect-tick])
        (when-not paused?
          [:p {:style (merge muted {:margin-top 0 :font-size "14px"})}
           "Pause, then use " [:strong "Step instruction"]

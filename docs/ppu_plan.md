@@ -240,6 +240,15 @@ Tests:
 
 ### Step 4: a console (`nes.machine`) and mapper 0
 
+*Done: `nes.machine`, `nes.cartridge` and `nes.emulator.machine`, and a
+choice of emulator in the CPU tab. To keep in step with jsnes, the console
+follows jsnes's timing rules (where it starts, when a frame ends, when an
+NMI is taken, the order of an access and its PPU dots, sprite DMA) rather
+than the simpler ones below. A first round of speed work (records,
+arrays in locals, `==` for numbers) took it from 5 to about 27 frames a
+second in the browser. Not done yet: the game harness on the real
+console.*
+
 The CPU, the PPU, 2 KB of RAM, the controllers and a cartridge, wired
 together:
 
