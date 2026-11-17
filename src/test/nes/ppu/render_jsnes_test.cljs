@@ -19,7 +19,10 @@
             [games.tower :as tower]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
+            [nes.bytes :as bytes]
+            [nes.ppu.core :as core]
             [nes.ppu.memory :as memory]
+            [nes.ppu.registers :as r]
             [nes.ppu.render :as render]))
 
 (defn- console [game]
@@ -50,14 +53,27 @@
   (dotimes [_ n] (emu/frame! emu))
   (doseq [b buttons] (emu/button-up! emu 1 b)))
 
+(defn- dot-by-dot
+  "The same frame drawn by nes.ppu.core, the PPU that goes dot by dot,
+  from the same state. Returns its picture."
+  [{:keys [memory palette oam ctrl mask t x]}]
+  (let [ppu (core/create)]
+    (bytes/copy-into! (:palette ppu) palette 0)
+    (bytes/copy-into! (:oam ppu) oam 0)
+    (doseq [[reg v] [[r/CTRL ctrl] [r/MASK mask] [r/T t] [r/X x]]] (r/set-reg! ppu reg v))
+    (core/frame! ppu memory)))
+
 (defn- compare-frame!
   "Draw the next frame both ways. Returns the pixels that differ, as
-  [x y ours theirs] (at most 10), or [] if none."
+  [x y ours theirs] (at most 10), or [] if none. Also checks the PPU that
+  goes dot by dot draws what the whole-frame renderer does."
   [{:keys [emu frame]}]
   ;; on to line 0 of the next frame
   (loop [] (when-not (zero? (:scanline (emu/ppu-state emu))) (emu/step-instruction! emu) (recur)))
   (let [in (inputs emu)
-        ours (render/colors! (js/Uint32Array. (* 256 240)) (:pixels (render/render in)) (emu/master-palette emu))]
+        whole (:pixels (render/render in))
+        _ (is (= (vec whole) (vec (dot-by-dot in))) "nes.ppu.core draws the same")
+        ours (render/colors! (js/Uint32Array. (* 256 240)) whole (emu/master-palette emu))]
     (loop [] (when-not (emu/step-instruction! emu) (recur)))
     (let [theirs @frame
           ;; jsnes blacks out the left 8 pixels when either layer is
