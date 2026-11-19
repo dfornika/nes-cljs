@@ -177,7 +177,7 @@
 ;; A record rather than a map, so looking up its parts is quick: the PPU
 ;; that draws (nes.ppu.core) does it millions of times a second, and fills
 ;; in the fields after :palette.
-(defrecord PPU [regs oam palette core secondary units picture])
+(defrecord PPU [regs oam palette core secondary units picture drawn])
 
 (defn create
   "A PPU's registers and its own memories, as at power on (all zero):

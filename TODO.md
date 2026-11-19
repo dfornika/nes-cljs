@@ -211,7 +211,13 @@ played. So combine them.
   - [ ] **Step 4 follow-ups** – our games' headless tests (`nes.cpu.harness`) on the real console,
     so their NMI budgets are measured rather than estimated; the bus monitor and code/data log
     for our console; remembering the emulator choice between visits
-  - [ ] **Step 5: compare with jsnes in the app** – next; see the plan
+  - [x] **Step 5: compare with jsnes in the app** – the CPU tab's "Check against jsnes as you
+    play": jsnes runs beside our console with the same buttons, RAM and pictures are compared
+    every frame (`nes.compare`), and the game pauses at the first difference with both pictures,
+    a diff and the RAM that differs. `nes.machine-test` now uses the same rules, from power on
+    (ours starts with jsnes's RAM). One more jsnes difference: lines drawn with drawing off show
+    the backdrop as it was when the frame began
+  - [ ] **Step 6: test ROMs** – next; see the plan
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,

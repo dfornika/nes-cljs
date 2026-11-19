@@ -9,6 +9,7 @@
   (:require [reagent.core :as r]
             [nes.audio :as audio]
             [nes.breakpoints :as bp]
+            [nes.compare :as compare]
             [nes.cpu.disasm :as disasm]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
@@ -167,6 +168,61 @@
    (swap! inspect-tick inc)))
 
 ;; ---------------------------------------------------------------------------
+;; Checking our console against jsnes, as you play (see nes.compare)
+;;
+;; While checking, jsnes runs beside our console as a 'shadow': it gets the
+;; same buttons, runs a frame after each of ours, and the two are compared.
+;; `shadow` holds {:emu jsnes, :ours and :theirs (atoms of their last
+;; pictures), :frames (an atom: how many frames were the same)}. What the
+;; CPU tab shows goes in `db` under :compare.
+
+(defonce ^:private shadow (atom nil))
+
+(defn compared-frames
+  "How many frames have been the same so far, while checking; else nil."
+  []
+  (some-> @shadow :frames deref))
+
+(defn stop-comparing!
+  "Stop checking against jsnes, saying `why` (in words)."
+  [why]
+  (when-let [{:keys [frames]} @shadow]
+    (reset! shadow nil)
+    (swap! db assoc :compare {:stopped why :frames @frames})))
+
+(defn- check-frame!
+  "Our console has just finished a frame: run jsnes's, and compare. Returns
+  true (and stops checking) if they differ."
+  []
+  (when-let [{:keys [emu ours theirs frames]} @shadow]
+    (emu/frame! emu)
+    (let [e @emulator
+          mask (:mask (emu/ppu-registers emu))
+          fine-x (bit-and (:x (:scroll (emu/ppu-state emu))) 7)
+          drawn (machine/lines-drawn e)
+          pixels (compare/picture-diffs @ours @theirs mask fine-x drawn)
+          ram (compare/ram-diffs #(emu/cpu-peek e %) #(emu/cpu-peek emu %))]
+      (if (and (empty? pixels) (empty? ram))
+        (do (swap! frames inc) false)
+        (do (reset! shadow nil)
+            (swap! db assoc :compare
+                   {:result {:frame (inc @frames)
+                             :pixels (count pixels)
+                             :ram ram
+                             :ours @ours
+                             :theirs @theirs
+                             :diff (compare/difference-picture! (js/Uint32Array. (* 256 240))
+                                                               @ours pixels mask fine-x drawn)}})
+            true)))))
+
+(defn- stop-at-difference!
+  "The two differ: pause, and show the CPU tab, where the difference is."
+  []
+  (swap! db assoc :status :paused :inspector-tab :cpu)
+  (audio/clear!)
+  (refresh-inspectors!))
+
+;; ---------------------------------------------------------------------------
 ;; Timing
 ;;
 ;; The NES draws about 60.1 frames per second. The browser asks us to draw
@@ -233,8 +289,10 @@
         (when-let [poll @input-poller] (poll))
         (if-let [hit (loop [n frames]
                        (when (pos? n)
-                         (or (emu/frame! @emulator) (recur (dec n)))))]
-          (stop-at-breakpoint! hit)
+                         (or (emu/frame! @emulator)
+                             (when (check-frame!) :differs)
+                             (recur (dec n)))))]
+          (if (= hit :differs) (stop-at-difference!) (stop-at-breakpoint! hit))
           (do
             (when (and (pos? frames) (seq (:overlays @db)))
               (swap! frame-tick inc))
@@ -334,6 +392,7 @@
   [hit]
   (when-let [id (get-in hit [:breakpoint :id])]
     (update-breakpoint! id update :hits (fnil inc 0)))
+  (stop-comparing! "a breakpoint stopped the game partway through a frame")
   (swap! db assoc :status :paused :break hit)
   (audio/clear!)
   (show-picture-so-far! @emulator)
@@ -369,15 +428,18 @@
   paused."
   []
   (while-paused! (fn [e]
-                   (when-let [hit (emu/frame! e)]
-                     (when-let [id (get-in hit [:breakpoint :id])]
-                       (update-breakpoint! id update :hits (fnil inc 0)))
-                     (swap! db assoc :break hit)))))
+                   (if-let [hit (emu/frame! e)]
+                     (do (when-let [id (get-in hit [:breakpoint :id])]
+                           (update-breakpoint! id update :hits (fnil inc 0)))
+                         (stop-comparing! "a breakpoint stopped the game partway through a frame")
+                         (swap! db assoc :break hit))
+                     (when (check-frame!) (stop-at-difference!))))))
 
 (defn step-instruction!
   "Run exactly one CPU instruction, then stay paused. The instruction is
   remembered in `recent-steps`."
   []
+  (stop-comparing! "the game was stepped an instruction at a time")
   (let [before @recent-steps
         instr (when-let [e @emulator]
                 (disasm/decode #(emu/cpu-peek e %) (:pc (emu/cpu-state e))))]
@@ -399,9 +461,11 @@
   "Run until the PPU starts the next scanline (about 114 CPU cycles), then
   stay paused."
   []
+  (stop-comparing! "the game was stepped a line at a time")
   (while-paused! step-scanline-on!))
 
 (defn reset-console! []
+  (stop-comparing! "Reset was pressed")
   (when-let [e @emulator]
     (emu/press-reset! e)
     (reset! recent-steps [])
@@ -416,6 +480,7 @@
   :cpu writes go to RAM (other addresses can't be poked and are skipped);
   :rom writes patch the cartridge. Returns the writes that worked."
   [writes]
+  (stop-comparing! "memory was changed by hand")
   (when-let [e @emulator]
     (let [done (filterv (fn [{:keys [space addr value]}]
                           (case space
@@ -435,6 +500,7 @@
   changes went: :rom (into the cartridge too), :live (only the PPU's
   memory), or nil if nothing was written. See emu/tile-poke!."
   [writes]
+  (stop-comparing! "tiles were changed by hand")
   (when-let [e @emulator]
     (let [results (doall (keep (fn [[addr value]] (emu/tile-poke! e addr value)) writes))
           in-rom (count (filter #{:rom} results))]
@@ -458,10 +524,12 @@
       (js/setTimeout #(js/URL.revokeObjectURL url) 1000))))
 
 (defn button-down! [player button]
-  (when-let [e @emulator] (emu/button-down! e player button)))
+  (when-let [e @emulator] (emu/button-down! e player button))
+  (when-let [{e :emu} @shadow] (emu/button-down! e player button)))
 
 (defn button-up! [player button]
-  (when-let [e @emulator] (emu/button-up! e player button)))
+  (when-let [e @emulator] (emu/button-up! e player button))
+  (when-let [{e :emu} @shadow] (emu/button-up! e player button)))
 
 ;; ---------------------------------------------------------------------------
 ;; Loading cartridges
@@ -471,10 +539,16 @@
   `rom-name` is just for display."
   [rom-name ^js bytes]
   (pause!)
+  (stop-comparing! "another game was loaded")
   (reset! last-rom {:name rom-name :bytes bytes})
   (if-let [header (rom/parse-header bytes)]
     (try
-      (let [e ((if (= @machine-choice :nes-cljs) machine/create jsnes/create) {:on-frame screen/draw!})]
+      (let [on-frame (fn [pixels]
+                       (screen/draw! pixels)
+                       ;; while checking against jsnes: keep a copy of our picture
+                       (when-let [{:keys [ours]} @shadow]
+                         (reset! ours (js/Uint32Array.from pixels))))
+            e ((if (= @machine-choice :nes-cljs) machine/create jsnes/create) {:on-frame on-frame})]
         (emu/set-audio-sink! e on-audio-sample)
         (emu/load-rom! e bytes)
         (emu/monitor-bus! e @bus-monitor?)
@@ -507,6 +581,26 @@
   (swap! db assoc :machine which)
   (when-let [{:keys [name bytes]} @last-rom]
     (load-bytes! name bytes)))
+
+(defn compare!
+  "Start the loaded game again on our console, with jsnes beside it, fed
+  the same buttons; after every frame, compare their RAM and pictures (see
+  nes.compare), and pause at the first difference."
+  []
+  (when-let [{:keys [name bytes]} @last-rom]
+    (reset! machine-choice :nes-cljs)
+    (swap! db assoc :machine :nes-cljs)
+    (load-bytes! name bytes)
+    (when-let [ours @emulator]
+      (let [theirs (atom nil)
+            them (jsnes/create {:on-frame #(reset! theirs (js/Uint32Array.from %))})]
+        (emu/load-rom! them bytes)
+        ;; set the two up to keep in step (see nes.compare)
+        (set! (.. ^js (:nes them) -ppu -clipToTvSize) false)
+        (machine/match-jsnes! ours)
+        (dotimes [a 0x800] (emu/cpu-poke! ours a (emu/cpu-peek them a)))
+        (reset! shadow {:emu them :ours (atom nil) :theirs theirs :frames (atom 0)})
+        (swap! db assoc :compare {:running? true})))))
 
 (defn machine-in-use
   "Which emulator runs games: :jsnes or :nes-cljs."

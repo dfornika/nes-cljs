@@ -284,6 +284,12 @@ now measure the real thing.
 
 ### Step 5: compare with jsnes in the app
 
+*Done, as you play rather than for a fixed 600 frames with no buttons
+pressed (our games would sit on their title screens): `nes.compare`, and
+"Check against jsnes as you play" in the CPU tab. Stepping by instruction
+or line, a breakpoint partway through a frame, Reset, and editing memory
+end the check, since the two can't stay in step through them.*
+
 The CPU tab's Compare runs two CPUs side by side for 600 frames and
 compares the picture and RAM each frame. Do the same with two consoles:
 jsnes, and ours. Any difference means stopping at that frame and showing

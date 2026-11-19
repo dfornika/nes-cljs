@@ -185,6 +185,13 @@ try {
     const f1 = await until(async () => { const f = await frame(); return f > f0 + 10 && f; });
     const colors = await until(async () => { const n = await colorsOnScreen(); return n > 3 && n; });
     check(true, `NES.cljs's own console runs Star Run (frame ${f0} → ${f1}, ${colors} colors)`);
+    // Check it against jsnes for a while: no differences
+    await page.click('button:text-is("CPU")');
+    await page.click('button:text-is("Check against jsnes as you play")');
+    const same = async () => { const t = await page.locator('text=/frames the same so far/').first().textContent(); return parseInt(t.match(/(\d+) frames/)[1]); };
+    const n = await until(async () => { const k = await same(); return k > 30 && k; }, 20000);
+    check(true, `checked against jsnes: ${n} frames the same`);
+    await page.click('button:text-is("Stop checking")');
     await page.click('button:text-is("CPU")');
     await page.locator('input[name="machine"]').nth(0).click();
     await page.waitForSelector('text=/jsnes is a JavaScript emulator/');

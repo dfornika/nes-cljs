@@ -46,6 +46,7 @@
     :secondary  the sprites found for the next line (8 x 4 bytes)
     :units      the sprites being drawn on this line (8 x x, attr, lo, hi)
     :picture    the frame, as palette indexes (see nes.ppu.render)
+    :drawn      for each line of the picture, 1 if drawing was on as it began
 
   The CPU reads and writes registers through `cpu-read!` and `cpu-write!`
   here, not nes.ppu.registers', since some behave differently while the
@@ -92,7 +93,8 @@
            :core core
            :secondary (bytes/make 32)
            :units (bytes/make 32)
-           :picture (bytes/make-words (* width 240)))))
+           :picture (bytes/make-words (* width 240))
+           :drawn (bytes/make 240))))
 
 (defn- c [ppu i] (bytes/word-at (:core ppu) i))
 (defn- c! [ppu i v] (bytes/put-word! (:core ppu) i v))
@@ -321,6 +323,7 @@
       (when (or (== dot 65) (<= 257 dot 320))
         (sprite-dot! ppu mem line dot)))
     (when (and (< line 240) (<= 1 dot 256))
+      (when (== dot 1) (bytes/put! (:drawn ppu) line (if drawing 1 0)))
       (pixel! ppu core regs line (dec dot)))
     ;; on to the next dot
     (cond

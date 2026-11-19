@@ -3,6 +3,7 @@
   the stack."
   (:require [clojure.string :as str]
             [nes.breakpoints-view :refer [breakpoints-panel]]
+            [nes.canvas :refer [pixel-canvas]]
             [nes.console :as console]
             [nes.cpu.disasm :as disasm :refer [hex]]
             [nes.cpu.opcodes :as ops]
@@ -288,6 +289,70 @@
 ;; ---------------------------------------------------------------------------
 ;; Which emulator, and which CPU
 
+(defn- picture
+  "A 256x240 picture (0x00BBGGRR pixels) with a caption."
+  [caption pixels]
+  [:div {:style {:flex "1 1 160px" :max-width "256px"}}
+   [:div {:style (merge muted {:font-size "12px" :margin-bottom "2px"})} caption]
+   [pixel-canvas {:width 256 :height 240
+                  :style {:width "100%" :height "auto" :border "1px solid #d0d7de"}
+                  :paint (fn [^js out]
+                           (dotimes [i (* 256 240)]
+                             (aset out i (bit-or 0xFF000000 (aget pixels i)))))}]])
+
+(defn- difference
+  "Where our console and jsnes first differed."
+  [{:keys [frame pixels ram ours theirs diff]}]
+  [:div {:style {:margin-top "8px" :padding "8px" :border "1px solid #ff8182" :border-radius "6px"
+                 :background "#fff8f8"}}
+   [:div [:strong {:style {:color "#cf222e"}} "✗ They differ at frame " frame "."]
+    " The game is paused there. "
+    (let [px (str pixels (if (= 1 pixels) " pixel" " pixels"))
+          bs (str (count ram) (if (= 1 (count ram)) " byte" " bytes") " of RAM")]
+      (cond
+        (and (pos? pixels) (seq ram)) (str px " and " bs " differ.")
+        (pos? pixels) (str px " differ; RAM is the same.")
+        :else (str bs " differ; the pictures are the same.")))]
+   (when (seq ram)
+     [:table {:style (merge mono {:border-collapse "collapse" :font-size "12px" :margin "6px 0"})}
+      [:thead [:tr (for [h ["address" "jsnes" "ours"]]
+                     ^{:key h} [:th {:style {:text-align "left" :padding "1px 10px 1px 0" :font-weight "normal" :color "#57606a"}} h])]]
+      [:tbody
+       (for [[a o t] (take 16 ram)]
+         ^{:key a} [:tr [:td {:style {:padding-right "10px"}} (hex a 4)]
+                    [:td {:style {:padding-right "10px"}} (hex t 2)] [:td (hex o 2)]])]
+      (when (> (count ram) 16)
+        [:tfoot [:tr [:td {:col-span 3 :style muted} "and " (- (count ram) 16) " more"]]])])
+   [:div {:style {:display "flex" :gap "8px" :flex-wrap "wrap" :margin-top "6px"}}
+    [picture "jsnes" theirs]
+    [picture "NES.cljs" ours]
+    [picture "where they differ (magenta)" diff]]
+   [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
+    "Striped parts are left out: jsnes draws them differently from a real NES (see "
+    [:span {:style mono} "nes.compare"] ")."]])
+
+(defn- compare-panel
+  "Checking our console against jsnes as you play."
+  [_tick]
+  (let [{:keys [running? stopped frames result]} (:compare @db)
+        checking (console/compared-frames)]
+    [:div {:style {:margin-top "8px"}}
+     (if checking
+       [:div [:span {:style {:color "#1a7f37" :font-weight "bold"}} "Checking against jsnes: "]
+        checking " frames the same so far. "
+        [:button {:on-click #(console/stop-comparing! "you stopped it")} "Stop checking"]]
+       [:div
+        [:button {:on-click console/compare!
+                  :title "Start the game again on our console, with jsnes running beside it, fed the same buttons. After every frame, RAM and the picture are compared; the game pauses at the first difference."}
+         "Check against jsnes as you play"]
+        " "
+        [:span {:style (merge muted {:font-size "12px"})}
+         (cond
+           stopped (str "Stopped checking after " frames " frames, all the same: " stopped ".")
+           (and running? (not result)) nil
+           :else "Starts the game again, with jsnes beside it pressing the same buttons, and pauses at the first frame where they differ.")]])
+     (when result [difference result])]))
+
 (defn- machine-choice []
   (let [which (or (:machine @db) (console/machine-in-use))
         option (fn [k label]
@@ -298,15 +363,17 @@
     [:div {:style {:border "1px solid #d0d7de" :border-radius "6px" :padding "8px 12px"
                    :margin-bottom "10px" :font-size "13px"}}
      [:div [:strong "Run the game on: "]
-      [option :jsnes "jsnes"]
-      [option :nes-cljs "NES.cljs's own console"]]
+      (option :jsnes "jsnes")
+      (option :nes-cljs "NES.cljs's own console")]
      [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
       (if (= which :nes-cljs)
         [:span "Our 6502 (" [:span {:style mono} "nes.cpu.core"] ") and our PPU ("
          [:span {:style mono} "nes.ppu.core"] ", one dot at a time), wired together in "
          [:span {:style mono} "nes.machine"] ". No sound yet, cartridges with mapper 0 only, "
          "and slower than jsnes: it's written to be read, not yet to be fast."]
-        "jsnes is a JavaScript emulator, with sound and many cartridge types. Switching starts the game again from power on.")]]))
+        "jsnes is a JavaScript emulator, with sound and many cartridge types. Switching starts the game again from power on.")]
+     (when (= which :nes-cljs)
+       [compare-panel @console/inspect-tick])]))
 
 (defn- cpu-choice
   "`_tick` is the inspector tick, so the counts here refresh."
@@ -322,8 +389,8 @@
     [:div {:style {:border "1px solid #d0d7de" :border-radius "6px" :padding "8px 12px"
                    :margin-bottom "14px" :font-size "13px"}}
      [:div [:strong "Run the CPU with: "]
-      [option :jsnes "jsnes's 6502 (JavaScript)"]
-      [option :cljs "NES.cljs's own 6502 (ClojureScript)"]]
+      (option :jsnes "jsnes's 6502 (JavaScript)")
+      (option :cljs "NES.cljs's own 6502 (ClojureScript)")]
      [:div {:style (merge muted {:font-size "12px" :margin-top "4px"})}
       (if (= which :cljs)
         [:span "nes.cpu.core runs every instruction and interrupt (official and unofficial); "
