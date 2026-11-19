@@ -1,32 +1,26 @@
 (ns nes.machine-test
   "Our games on NES.cljs's own console (nes.machine: our CPU and our PPU),
   side by side with jsnes: the same buttons pressed on the same frames,
-  then the same RAM and the same picture after every frame.
+  then the same RAM and the same picture after every frame, from power on.
 
-  Pictures are compared except where jsnes is known to draw differently
-  from a PPU (see nes.ppu.render-jsnes-test): the right-hand pixels when
-  scrolled by part of a tile, the left 8 when PPUMASK hides either layer
-  there, and the edges a TV hides, which jsnes blacks out unless told not
-  to. And jsnes doesn't skip a dot on odd frames, so for this ours doesn't
-  either.
-
-  The two start the same way (the PPU at line 241, the CPU at the RESET
-  address), end frames at the same moment (as vertical blank starts), and
-  follow the same rules for when an NMI is taken, so they keep in step
-  cycle for cycle."
+  This is the CPU tab's \"Check against jsnes\" (nes.console/compare!),
+  with the same rules (nes.compare): what's set up first so the two keep
+  in step, and which pixels are left out because jsnes draws them
+  differently from a real PPU."
   (:require [cljs.test :refer [deftest is testing]]
             [games.alienscape :as alienscape]
             [games.hello :as hello]
             [games.hopper :as hopper]
             [games.star-run :as star-run]
             [games.tower :as tower]
+            [nes.compare :as compare]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
-            [nes.emulator.machine :as machine]
-            [nes.ppu.core :as ppu]))
+            [nes.emulator.machine :as machine]))
 
 (defn- pair
-  "jsnes and our console, each with `game` loaded, keeping their last pictures."
+  "jsnes and our console, each with `game` loaded, keeping their last
+  pictures, set up to keep in step (as nes.console/compare! does)."
   [game]
   (let [rom (js/Uint8Array.from (clj->js (:rom (game))))
         make (fn [create]
@@ -37,43 +31,28 @@
         j (make jsnes/create)
         o (make machine/create)]
     (set! (.. ^js (:nes (:emu j)) -ppu -clipToTvSize) false)
-    ;; jsnes doesn't skip the odd frames' dot, as a real NES does
-    (ppu/skip-odd-dot! (:ppu (.-m ^js (:state (:emu o)))) false)
-    ;; RAM starts out different (jsnes fills it with $FF), and our games
-    ;; clear it in their first frames
-    (dotimes [_ 5] (emu/frame! (:emu j)) (emu/frame! (:emu o)))
+    (machine/match-jsnes! (:emu o))
+    (dotimes [a 0x800] (emu/cpu-poke! (:emu o) a (emu/cpu-peek (:emu j) a)))
     {:jsnes j :ours o}))
-
-(defn- ram [e] (mapv #(emu/cpu-peek e %) (range 0x800)))
-
-(defn- picture-diffs
-  "Pixels that differ, as [x y], skipping the ones jsnes gets wrong."
-  [{:keys [jsnes ours]}]
-  (let [a @(:pic ours), b @(:pic jsnes)
-        fine-x (bit-and (:x (:scroll (emu/ppu-state (:emu jsnes)))) 7)
-        ;; jsnes blacks out the left 8 pixels when PPUMASK hides either
-        ;; layer there (even with drawing off); a PPU shows the backdrop
-        left (if (= 6 (bit-and (:mask (emu/ppu-registers (:emu jsnes))) 6)) 0 8)]
-    (for [i (range (* 256 240))
-          :let [x (mod i 256)]
-          :when (<= left x (- 255 fine-x))
-          :when (not= (bit-and (aget a i) 0xFFFFFF) (bit-and (aget b i) 0xFFFFFF))]
-      [x (quot i 256)])))
 
 (defn- play!
   "Run both for `n` frames holding `buttons`. Returns the first frame where
-  they differ, as {:frame :ram-at :pixels}, or nil."
-  [{:keys [jsnes ours] :as p} n & buttons]
+  they differ, as {:frame :ram :pixels}, or nil."
+  [{:keys [jsnes ours]} n & buttons]
   (doseq [{e :emu} [jsnes ours] b buttons] (emu/button-down! e 1 b))
   (let [result (loop [k 0]
                  (when (< k n)
                    (emu/frame! (:emu jsnes))
                    (emu/frame! (:emu ours))
-                   (let [ra (ram (:emu ours)) rb (ram (:emu jsnes))
-                         ram-at (first (filter #(not= (ra %) (rb %)) (range 0x800)))
-                         px (take 5 (picture-diffs p))]
-                     (if (or ram-at (seq px))
-                       {:frame k :ram-at ram-at :pixels (vec px)}
+                   (let [j (:emu jsnes), o (:emu ours)
+                         ram (compare/ram-diffs #(emu/cpu-peek o %) #(emu/cpu-peek j %))
+                         px (compare/picture-diffs @(:pic ours) @(:pic jsnes)
+                                                   (:mask (emu/ppu-registers j))
+                                                   (bit-and (:x (:scroll (emu/ppu-state j))) 7)
+                                                   (machine/lines-drawn o))]
+                     (if (or (seq ram) (seq px))
+                       {:frame k :ram (vec (take 5 ram))
+                        :pixels (mapv (fn [i] [(mod i 256) (quot i 256)]) (take 5 px))}
                        (recur (inc k))))))]
     (doseq [{e :emu} [jsnes ours] b buttons] (emu/button-up! e 1 b))
     result))

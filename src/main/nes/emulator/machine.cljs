@@ -135,3 +135,17 @@
   [{:keys [on-frame]}]
   (->MachineEmulator #js {:m nil :file nil :onFrame on-frame :bps []
                           :out (js/Uint32Array. (* 256 240))}))
+
+(defn match-jsnes!
+  "Run as jsnes does where it differs from a real NES in timing, so the two
+  keep in step for comparing: don't skip the odd frames' dot."
+  [e]
+  (let [^js st (:state e)]
+    (ppu/skip-odd-dot! (:ppu (.-m st)) false)))
+
+(defn lines-drawn
+  "For each line of the last picture, 1 if drawing was on as it began, else
+  0 (a byte array of 240)."
+  [e]
+  (let [^js st (:state e)]
+    (:drawn (:ppu (.-m st)))))
