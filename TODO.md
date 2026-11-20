@@ -217,7 +217,17 @@ played. So combine them.
     a diff and the RAM that differs. `nes.machine-test` now uses the same rules, from power on
     (ours starts with jsnes's RAM). One more jsnes difference: lines drawn with drawing off show
     the backdrop as it was when the frame began
-  - [ ] **Step 6: test ROMs** – next; see the plan
+  - [x] **Step 6: test ROMs** – blargg's PPU tests for mapper 0 in `test-roms/` (with a
+    README and scoreboard), run by `npm run test:roms` (`nes.rom-suite`, in CI). 40 of 41 pass
+    on our console (jsnes: 24). Fixed on the way: NMI cancelled by a $2002 read or NMI turned
+    off one PPU clock after vertical blank starts, an NMI turned on just before it ends; the
+    latch fading per bit; the sprite search's timing and its overflow bug
+    (`nes.ppu.sprite-search`); blargg's power-on palette
+  - [ ] **The odd frame's skipped dot vs. PPUMASK** – `ppu_vbl_nmi/10-even_odd_timing` (#3):
+    turning drawing on and off take effect after different delays on a real PPU
+  - [ ] **More test ROMs** – AccuracyCoin; the mapper 1 and 3 ones (`ppu_read_buffer`, the
+    all-in-one `ppu_vbl_nmi`) once we have those mappers; the CPU's interrupt and DMA tests
+  - [ ] **Step 7: more mappers** – next; see the plan
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,

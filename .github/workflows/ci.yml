@@ -2,6 +2,7 @@
 #
 # 1. Unit tests (npm test): the pure ClojureScript namespaces, in Node,
 #    and (npm run test:jvm) the portable ones again on the JVM.
+#    Then (npm run test:roms) blargg's test ROMs on our own console.
 # 2. A release build of the site (npm run release), which also catches
 #    compiler warnings that only show up with optimizations on.
 # 3. A smoke test (npm run smoke): serves the built site, opens it in
@@ -63,6 +64,11 @@ jobs:
       # the browser (the .cljc files).
       - name: Unit tests (JVM)
         run: npm run test:jvm
+
+      # blargg's PPU test ROMs (test-roms/) on NES.cljs's own console:
+      # a few minutes of emulated time
+      - name: Test ROMs
+        run: npm run test:roms
 
       - name: Release build
         run: npm run release

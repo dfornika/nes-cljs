@@ -176,3 +176,19 @@
       (memory/video-write! rom 0x10 1)
       (memory/video-write! ram 0x10 1)
       (is (= [7 1] [(memory/video-read rom 0x10) (memory/video-read ram 0x10)])))))
+
+(deftest the-latch-fades
+  (let [{:keys [ppu] :as p} (fresh)]
+    (do-ops! p [[:write 0x2000 0xFF]])
+    (dotimes [_ r/fade-frames] (r/next-frame! ppu))
+    (is (= [0xFF] (do-ops! p [[:read 0x2005]])) "still there after 600 ms...")
+    (r/next-frame! ppu)
+    (is (= [0] (do-ops! p [[:read 0x2005]])) "...gone after")
+    (testing "reading PPUSTATUS refreshes only its top 3 bits"
+      (do-ops! p [[:write 0x2000 0xFF]])
+      (r/set-status! ppu r/VBLANK true)
+      (dotimes [_ (inc r/fade-frames)]
+        (r/next-frame! ppu)
+        (r/set-status! ppu r/VBLANK true)
+        (do-ops! p [[:read 0x2002]]))
+      (is (= [0x80] (do-ops! p [[:read 0x2005]]))))))

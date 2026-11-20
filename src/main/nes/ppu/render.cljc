@@ -35,7 +35,8 @@
   `colors!` turns them into RGB with a master palette."
   (:require [nes.bytes :as bytes]
             [nes.ppu.memory :as memory]
-            [nes.ppu.registers :as r]))
+            [nes.ppu.registers :as r]
+            [nes.ppu.sprite-search :as sprite-search]))
 
 (def ^:const width 256)
 (def ^:const height 240)
@@ -78,13 +79,11 @@
 ;; ---------------------------------------------------------------------------
 ;; Sprites
 
-(defn- sprites-on-line
-  "How many sprites are on line `y`. (More than 8 sets the overflow flag.)"
+(defn- overflows?
+  "Does the PPU's search for line `y`'s sprites (on the line before) set the
+  overflow flag? (See nes.ppu.sprite-search, for its bug.)"
   [oam y sprite-height]
-  (loop [i 0, found 0]
-    (if (= i 64)
-      found
-      (recur (inc i) (if (< -1 (- y (inc (bytes/at oam (* 4 i)))) sprite-height) (inc found) found)))))
+  (and (pos? y) (some? (:overflow-dot (sprite-search/search oam (dec y) sprite-height)))))
 
 (defn- sprite-line!
   "Draw the sprites on line `y` into `line` (256 bytes: 0 where there's no
@@ -147,9 +146,10 @@
     :t :x     the scroll: t and fine X, as nes.ppu.registers keeps them
 
   Returns what the PPU would have noticed on the way:
-  {:sprite-0-hit [x y] or nil, :overflow-line the first line with more
-  than 8 sprites (up to 240: the PPU looks for line 240's sprites too,
-  though it never draws them), or nil}."
+  {:sprite-0-hit [x y] or nil, :overflow-line the first line whose search
+  for sprites set the overflow flag (up to 240: the PPU looks for line
+  240's sprites too, though it never draws them), or nil}. The flag has a
+  hardware bug: see nes.ppu.sprite-search."
   [out {:keys [memory palette oam ctrl mask t x]}]
   (let [show-bg? (bit-test mask 3)
         show-sprites? (bit-test mask 4)
@@ -174,11 +174,10 @@
           ;; The PPU looks for sprites whenever it's drawing, shown or not,
           ;; and on line 239 looks for line 240's, which is never drawn
           {:sprite-0-hit hit
-           :overflow-line (or overflow (when (> (sprites-on-line oam height sprite-height) 8) height))}
+           :overflow-line (or overflow (when (overflows? oam height sprite-height) height))}
           (let [v (r/copy-x v t)
                 _ (if show-bg? (background-line! bg memory v x bg-table) (bytes/fill! bg 0))
                 _ (if show-sprites? (sprite-line! spr memory oam y sprite-height sprite-table) (bytes/fill! spr 0))
-                found (sprites-on-line oam y sprite-height)
                 hit (loop [px 0, hit hit]
                       (if (= px width)
                         hit
@@ -199,7 +198,7 @@
             (recur (inc y)
                    (r/increment-y v)
                    hit
-                   (or overflow (when (> found 8) y)))))))))
+                   (or overflow (when (overflows? oam y sprite-height) y)))))))))
 
 (defn render
   "`render!` into a new picture. Returns {:pixels :sprite-0-hit :overflow-line}."

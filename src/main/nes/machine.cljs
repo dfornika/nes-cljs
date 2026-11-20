@@ -73,10 +73,24 @@
       (do (set! (.-raised s) true)
           (set! (.-raisedAt s) (.-bus s))
           (when dots-left (set! (.-dotsLeft s) dots-left)))
-      ;; reading PPUSTATUS right as vertical blank starts: the NMI is lost
+      ;; Falling again as vertical blank ends, just after NMI was turned on.
+      ;; If the request was up for 2 PPU dots or more, the CPU saw it, and
+      ;; the NMI happens (blargg's ppu_vbl_nmi 07). The turning on happened
+      ;; before this cycle's dots, and `dots-left` of them are still to come.
+      (and (not level) (.-nmiLevel s) (.-raised s) dots-left)
+      (if (and (= (.-bus s) (.-raisedAt s)) (>= dots-left 2))
+        (set! (.-raised s) false)
+        (do (set! (.-nmiPending s) true)
+            (set! (.-raised s) false)))
+
+      ;; Reading PPUSTATUS (or turning NMI off) on the PPU clock vertical
+      ;; blank starts, or the one after: too soon for the CPU to see it, so
+      ;; there's no NMI (blargg's ppu_vbl_nmi 06 and 08, vbl_nmi_timing 5 and 6)
       (and (not level) (.-nmiLevel s) (.-raised s))
-      (let [diff (- (.-bus s) (.-raisedAt s))]
-        (when (or (zero? diff) (and (= diff 1) (zero? (.-dotsLeft s))))
+      (let [diff (- (.-bus s) (.-raisedAt s))
+            ;; PPU dots since the rise: the rest of its cycle, then whole cycles
+            since (+ (.-dotsLeft s) (* 3 (dec diff)))]
+        (when (or (zero? diff) (<= since 1))
           (set! (.-raised s) false))))
     (set! (.-nmiLevel s) level)))
 

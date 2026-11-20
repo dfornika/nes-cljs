@@ -11,6 +11,7 @@
     "test": "clojure -M:dev:test -m shadow.cljs.devtools.cli compile test && node target/test/test.js",
     "import:alienscape": "clojure -M -m games.alienscape.import",
     "test:jvm": "clojure -M:test:test-jvm",
+    "test:roms": "clojure -M:dev:test -m shadow.cljs.devtools.cli release test-roms && node target/test-roms/test.js",
     "test:watch": "clojure -M:dev:test -m shadow.cljs.devtools.cli watch test",
     "smoke": "node scripts/smoke-test.mjs"
   },
