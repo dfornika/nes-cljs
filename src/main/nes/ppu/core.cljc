@@ -53,7 +53,8 @@
   PPU draws."
   (:require [nes.bytes :as bytes]
             [nes.ppu.memory :as memory]
-            [nes.ppu.registers :as r]))
+            [nes.ppu.registers :as r]
+            [nes.ppu.sprite-search :as sprite-search]))
 
 (def ^:const width 256)
 (def ^:const dots-per-line 341)
@@ -80,14 +81,17 @@
 (def ^:const ARMED 15)    ; 1 once line 240 has passed: vertical blank comes next
 (def ^:const SUPPRESS 16) ; 1 if PPUSTATUS was read just before vertical blank
 (def ^:const SKIP-ODD 17) ; 1 (as on a real NES) to skip a dot on odd frames
+(def ^:const OVERFLOW-DOT 18) ; the dot on this line the overflow flag goes up, or `never`
+(def ^:const never 0xFFFF)    ; a dot that never comes
 
 (defn create
   "A PPU at power on. It starts on the pre-render line, so the first `tick!`s
   get the first frame ready. (A real one starts somewhere else each time;
   see `set-position!`.)"
   []
-  (let [core (bytes/make-words 18)]
+  (let [core (bytes/make-words 19)]
     (bytes/put-word! core SKIP-ODD 1)
+    (bytes/put-word! core OVERFLOW-DOT never)
     (bytes/put-word! core LINE pre-render)
     (assoc (r/create)
            :core core
@@ -184,20 +188,19 @@
 (defn- sprite-height [ppu] (if (bit-test (r/reg ppu r/CTRL) 5) 16 8))
 
 (defn- find-sprites!
-  "Find the sprites on the line after `line`: the first 8 into secondary
-  OAM. A 9th sets the overflow flag."
+  "Find the sprites on the line after `line`, the first 8 into secondary
+  OAM, and when the overflow flag goes up (see nes.ppu.sprite-search). The
+  search takes dots 65-256 on a real PPU; this does it at dot 65, and the
+  flag goes up on its dot."
   [ppu line]
-  (let [oam (:oam ppu), secondary (:secondary ppu), h (sprite-height ppu)]
+  (let [oam (:oam ppu), secondary (:secondary ppu)
+        {:keys [found overflow-dot]} (sprite-search/search oam line (sprite-height ppu))]
     (bytes/fill! secondary 0xFF)
-    (loop [i 0, found 0, zero 0]
-      (if (== i 64)
-        (do (c! ppu FOUND (min found 8)) (c! ppu FOUND-0 zero))
-        (if (< -1 (- line (bytes/at oam (* 4 i))) h)
-          (do (when (< found 8)
-                (dotimes [k 4] (bytes/put! secondary (+ (* 4 found) k) (bytes/at oam (+ (* 4 i) k)))))
-              (when (== found 8) (r/set-status! ppu r/OVERFLOW true))
-              (recur (inc i) (inc found) (if (zero? i) 1 zero)))
-          (recur (inc i) found zero))))))
+    (doseq [[slot n] (map-indexed vector found)]
+      (dotimes [k 4] (bytes/put! secondary (+ (* 4 slot) k) (bytes/at oam (+ (* 4 n) k)))))
+    (c! ppu FOUND (count found))
+    (c! ppu FOUND-0 (if (= 0 (first found)) 1 0))
+    (c! ppu OVERFLOW-DOT (or overflow-dot never))))
 
 (defn- fetch-sprite!
   "Fetch sprite unit `k`'s row of pixels for the next line. A unit with no
@@ -310,6 +313,7 @@
                   ;; at the end of dot 0, so it's there as dot 1 begins
                   (and (== line vblank-line) (== 1 (c ppu ARMED)))
                   (do (c! ppu ARMED 0)
+                      (r/next-frame! ppu)
                       (when (zero? (c ppu SUPPRESS)) (r/set-status! ppu r/VBLANK true))
                       (c! ppu SUPPRESS 0)
                       :vblank)
@@ -319,6 +323,8 @@
                       (r/set-status! ppu r/OVERFLOW false)
                       :pre-render)))]
     (when (and drawing (or (< line 240) (== line pre-render)))
+      (when (and (== dot (bytes/word-at core OVERFLOW-DOT)) (< line 240))
+        (r/set-status! ppu r/OVERFLOW true))
       (background-dot! core regs mem line dot)
       (when (or (== dot 65) (<= 257 dot 320))
         (sprite-dot! ppu mem line dot)))
@@ -327,7 +333,10 @@
       (pixel! ppu core regs line (dec dot)))
     ;; on to the next dot
     (cond
-      ;; odd frames are a dot short when drawing: the last of the pre-render line is skipped
+      ;; Odd frames are a dot short when drawing: the last of the pre-render
+      ;; line is skipped. (Not exact yet: on a real PPU, turning drawing on
+      ;; and turning it off take effect after different delays; blargg's
+      ;; ppu_vbl_nmi 10 checks it, and fails here.)
       (and (== line pre-render) (== dot 339) drawing (odd? (bytes/word-at core FRAME)) (== 1 (bytes/word-at core SKIP-ODD)))
       (do (bytes/put-word! core LINE 0) (bytes/put-word! core DOT 0) (bytes/put-word! core FRAME (inc (bytes/word-at core FRAME))))
       (< dot 340) (bytes/put-word! core DOT (inc dot))
@@ -375,7 +384,7 @@
               v (if (<= 65 dot 256)
                   (let [b (bytes/at (:oam ppu) i)] (if (= 2 (bit-and i 3)) (bit-and b 0xE3) b))
                   0xFF)]
-          (r/set-reg! ppu r/LATCH v)
+          (r/refresh-latch! ppu 0xFF v)
           v)
       7 (let [v (r/reg ppu r/V)
               value (r/read! ppu mem addr)]
@@ -394,7 +403,7 @@
   (if-not (drawing-now? ppu)
     (r/write! ppu mem addr value)
     (case (int (bit-and addr 7))
-      4 (do (r/set-reg! ppu r/LATCH value)
+      4 (do (r/refresh-latch! ppu 0xFF value)
             (r/set-reg! ppu r/OAM-ADDR (bit-and (+ (r/reg ppu r/OAM-ADDR) 4) 0xFC)))
       7 (let [v (r/reg ppu r/V)]
           (r/write! ppu mem addr value)

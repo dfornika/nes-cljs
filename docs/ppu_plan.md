@@ -301,6 +301,13 @@ some differences will be ours being right.
 
 ### Step 6: test ROMs
 
+*Done for blargg's mapper 0 PPU tests: 40 of 41 pass (`test-roms/README.md`
+has the scoreboard). They found five things to fix; in four of them our
+console now does better than jsnes, so the two can differ in those
+corners (NMI races, the overflow flag), which the "check against jsnes"
+mode may notice in a game that relies on them. AccuracyCoin is still to
+come.*
+
 What's worth checking, by area:
 
 - **Vertical blank and NMI timing:** blargg's `ppu_vbl_nmi` and

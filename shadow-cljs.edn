@@ -18,4 +18,11 @@
                  ;; jsnes's bundle as an ES module (its package says "type":
                  ;; "module") and gets nothing from it
                  :js-options {:js-provider :shadow}
-                 :autorun true}}}
+                 :autorun true}
+          ;; blargg's test ROMs on our console (npm run test:roms): minutes of
+          ;; emulated time, so a build of their own, optimized
+          :test-roms {:target :node-test
+                      :output-to "target/test-roms/test.js"
+                      :ns-regexp "rom-suite$"
+                      :js-options {:js-provider :shadow}
+                      :release {:compiler-options {:optimizations :simple}}}}}

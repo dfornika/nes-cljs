@@ -29,7 +29,9 @@
   []
   (let [{:keys [prg-size chr-size mirroring]} (rom/parse-header cartridge)
         chr (when (pos? chr-size) (bytes/slice cartridge (+ 16 prg-size) (+ 16 prg-size chr-size)))]
-    {:ppu (r/create) :mem (memory/video-memory {:chr chr :mirroring mirroring})}))
+    ;; palette RAM starts as jsnes's does (zeros), not as on blargg's NES
+    {:ppu (assoc (r/create) :palette (bytes/make 32))
+     :mem (memory/video-memory {:chr chr :mirroring mirroring})}))
 
 (defn- theirs []
   (doto (jsnes/create {:on-frame (fn [_])})

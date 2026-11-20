@@ -168,6 +168,8 @@
 (def ^:const W 7)
 (def ^:const BUFFER 8)   ; PPUDATA's read buffer
 (def ^:const LATCH 9)    ; the last byte on the PPU's data bus: what a write-only register reads as
+(def ^:const NOW 10)     ; frames so far (the PPU counts them), for the latch's fading
+(def ^:const AGES 11)    ; 11-18: the frame each bit of the latch was last set to 1
 
 ;; PPUSTATUS bits
 (def ^:const VBLANK 0x80)
@@ -179,16 +181,24 @@
 ;; in the fields after :palette.
 (defrecord PPU [regs oam palette core secondary units picture drawn])
 
+(def power-on-palette
+  "What palette RAM holds at power on. Really it's whatever it happens to
+  hold; these are the values on blargg's NES, which his power_up_palette
+  test checks for, and which other emulators use too."
+  [0x09 0x01 0x00 0x01 0x00 0x02 0x02 0x0D 0x08 0x10 0x08 0x24 0x00 0x00 0x04 0x2C
+   0x09 0x01 0x34 0x03 0x00 0x04 0x00 0x14 0x08 0x3A 0x00 0x02 0x00 0x20 0x2C 0x08])
+
 (defn create
-  "A PPU's registers and its own memories, as at power on (all zero):
+  "A PPU's registers and its own memories, as at power on (zero, but for
+  the palette: see `power-on-palette`):
 
     :regs     the registers (CTRL, MASK, STATUS ... above)
     :oam      sprite memory: 64 sprites of 4 bytes
     :palette  palette RAM: 32 bytes of color numbers"
   []
-  (map->PPU {:regs (bytes/make-words 10)
+  (map->PPU {:regs (bytes/make-words 19)
              :oam (bytes/make 256)
-             :palette (bytes/make 32)}))
+             :palette (bytes/from power-on-palette)}))
 
 (defn reg "The register at index `i` of `ppu`'s registers." [ppu i] (bytes/word-at (:regs ppu) i))
 (defn set-reg! "Set the register at index `i` of `ppu`'s registers." [ppu i value] (bytes/put-word! (:regs ppu) i value))
@@ -198,7 +208,7 @@
   {:ctrl :mask :status :oam-addr :v :t :x :w :buffer :latch}."
   [ppu]
   (zipmap [:ctrl :mask :status :oam-addr :v :t :x :w :buffer :latch]
-          (map #(reg ppu %) (range 10))))
+          (map #(reg ppu %) (range 10))))   ; the registers, not the latch's ages
 
 (defn set-status!
   "Turn a PPUSTATUS bit (VBLANK, SPRITE-0-HIT, OVERFLOW) on or off."
@@ -223,6 +233,39 @@
   (let [i (bit-and addr 0x1F)]
     (if (= (bit-and i 0x13) 0x10) (bit-and i 0x0F) i)))
 
+(def ^:const fade-frames
+  "How long a 1 in the latch lasts without being refreshed: about 600 ms
+  (blargg's ppu_open_bus: it must be gone within a second)."
+  36)
+
+(defn latch
+  "The latch: the last byte on the PPU's data bus, as the write-only
+  registers read. Each bit that was 1 fades to 0 if nothing has refreshed
+  it for `fade-frames` frames."
+  [ppu]
+  (let [now (reg ppu NOW)
+        faded (reduce (fn [l b]
+                        (if (and (bit-test l b) (> (- now (reg ppu (+ AGES b))) fade-frames))
+                          (bit-and l (bit-xor 0xFF (bit-shift-left 1 b)))
+                          l))
+                      (reg ppu LATCH) (range 8))]
+    (set-reg! ppu LATCH faded)
+    faded))
+
+(defn refresh-latch!
+  "Put the bits of `value` that `mask` covers on the latch, refreshing
+  them. (Writes refresh all 8; reads only the bits the register drives.)"
+  [ppu mask value]
+  (set-reg! ppu LATCH (bit-or (bit-and (latch ppu) (bit-xor 0xFF mask)) (bit-and value mask)))
+  (dotimes [b 8]
+    (when (and (bit-test mask b) (bit-test value b))
+      (set-reg! ppu (+ AGES b) (reg ppu NOW)))))
+
+(defn next-frame!
+  "A frame has passed (the PPU calls this), for the latch's fading."
+  [ppu]
+  (set-reg! ppu NOW (inc (reg ppu NOW))))
+
 (defn- step-address!
   "After a PPUDATA access: v moves on by 1, or by 32 (a row of tiles down)
   if PPUCTRL bit 2 is on."
@@ -245,8 +288,10 @@
                   (set-reg! ppu BUFFER (memory/video-read mem (bit-and addr 0x2FFF)))
                   ;; 6 bits of color; the top 2 are whatever was on the bus
                   (bit-or (bit-and (bytes/at (:palette ppu) (palette-index addr)) 0x3F)
-                          (bit-and (reg ppu LATCH) 0xC0))))]
+                          (bit-and (latch ppu) 0xC0))))]
     (step-address! ppu)
+    ;; what the PPU drove on the bus refreshes those bits of the latch
+    (refresh-latch! ppu (if (< addr 0x3F00) 0xFF 0x3F) value)
     value))
 
 (defn- write-data! [ppu mem value]
@@ -262,28 +307,31 @@
   read. Reading has effects: PPUSTATUS clears the vertical blank bit and
   w, PPUDATA moves the address on.
 
-  The write-only registers read as the last byte on the PPU's data bus.
-  (On a real NES that fades after a while; not here.)"
+  The write-only registers read as the last byte on the PPU's data bus
+  (`latch`), which fades. Reading a register refreshes the bits of the
+  latch that register drives: all 8 for OAMDATA and PPUDATA, the top 3 for
+  PPUSTATUS, the low 6 for a palette read, none for the write-only ones."
   [ppu mem addr]
-  (let [value (case (int (bit-and addr 7))
-                2 (let [v (bit-or (bit-and (reg ppu STATUS) 0xE0) (bit-and (reg ppu LATCH) 0x1F))]
-                    (set-status! ppu VBLANK false)
-                    (set-reg! ppu W 0)
-                    v)
-                4 (let [i (reg ppu OAM-ADDR)
-                        v (bytes/at (:oam ppu) i)]
-                    ;; a sprite's attribute byte has no bits 2-4: they read as 0
-                    (if (= 2 (bit-and i 3)) (bit-and v 0xE3) v))
-                7 (read-data! ppu mem)
-                (reg ppu LATCH))]
-    (set-reg! ppu LATCH value)
-    value))
+  (case (int (bit-and addr 7))
+    2 (let [v (bit-or (bit-and (reg ppu STATUS) 0xE0) (bit-and (latch ppu) 0x1F))]
+        (set-status! ppu VBLANK false)
+        (set-reg! ppu W 0)
+        (refresh-latch! ppu 0xE0 v)
+        v)
+    4 (let [i (reg ppu OAM-ADDR)
+            v (bytes/at (:oam ppu) i)
+            ;; a sprite's attribute byte has no bits 2-4: they read as 0
+            v (if (= 2 (bit-and i 3)) (bit-and v 0xE3) v)]
+        (refresh-latch! ppu 0xFF v)
+        v)
+    7 (read-data! ppu mem)
+    (latch ppu)))
 
 (defn write!
   "The CPU writes `value` to PPU register `addr` ($2000-$3FFF; only the low
   3 bits matter). `mem` is the video memory (see nes.ppu.memory)."
   [ppu mem addr value]
-  (set-reg! ppu LATCH value)
+  (refresh-latch! ppu 0xFF value)
   (case (int (bit-and addr 7))
     0 (do (set-reg! ppu CTRL value)
           (set-reg! ppu T (after-ctrl (reg ppu T) value)))
