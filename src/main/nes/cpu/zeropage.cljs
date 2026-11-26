@@ -9,7 +9,7 @@
   and nes.cpu.zeropage-test runs the same programs on both CPUs to check
   they agree.
 
-  zeropage's bus is just {:read :write}. nes.cpu.core's has more methods,
+  zeropage's bus is just {:read :write}. nes.cpu.core's Bus has more,
   so it can tell an opcode fetch from a data read, or a stack push from a
   store (a console needs to know). Here they're all plain reads and
   writes."
@@ -19,16 +19,17 @@
 (defn- core-bus
   "A nes.cpu.core bus made from a zeropage bus."
   [{:keys [read write]}]
-  #js {:fetch read
-       :readOperand read
-       :read read
-       :read16 (fn [a] (bit-or (read a) (bit-shift-left (read (bit-and (inc a) 0xFFFF)) 8)))
-       :write write
-       :readVector read
-       :tick (fn [])
-       :dmcDuringInstruction (fn [] false)
-       :push (fn [sp v] (write (bit-or 0x100 sp) v))
-       :pull (fn [sp] (read (bit-or 0x100 (bit-and (inc sp) 0xFF))))})
+  (reify core/Bus
+    (fetch [_ a] (read a))
+    (read-operand [_ a] (read a))
+    (read [_ a] (read a))
+    (read16 [_ a] (bit-or (read a) (bit-shift-left (read (bit-and (inc a) 0xFFFF)) 8)))
+    (write [_ a v] (write a v))
+    (read-vector [_ a] (read a))
+    (tick [_] nil)
+    (dmc-during-instruction? [_] false)
+    (push [_ sp v] (write (bit-or 0x100 sp) v))
+    (pull [_ sp] (read (bit-or 0x100 (bit-and (inc sp) 0xFF))))))
 
 (defn create
   "nes.cpu.core on `bus` ({:read :write}), as a zeropage.cpu/Cpu. Unlike

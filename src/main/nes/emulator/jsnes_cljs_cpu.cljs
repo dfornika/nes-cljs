@@ -34,29 +34,30 @@
 (defn- bus-for
   "A bus (see nes.cpu.core) over jsnes's CPU `cpu`."
   [^js cpu ^js ppu]
-  #js {:fetch (fn [a]
-                ;; what jsnes's emulate() does to fetch an opcode
-                (let [op (.loadFromCartridge cpu a)]
-                  (set! (.-dataBus cpu) op)
-                  (set! (.-instrBusCycles cpu) 1)
-                  (.advanceDots ppu 3)
-                  op))
-       :readOperand (fn [a] (.loadDirect cpu a))
-       :read16 (fn [a] (.load16bit cpu a))
-       :read (fn [a] (.load cpu a))
-       :write (fn [a v] (.write cpu a v))
-       ;; jsnes's push and pull move its own stack pointer: hand them ours
-       :push (fn [sp v] (set! (.-REG_SP cpu) sp) (.push cpu v))
-       :pull (fn [sp] (set! (.-REG_SP cpu) sp) (.pull cpu))
-       :readVector (fn [a]
-                     (let [v (.loadFromCartridge cpu a)]
-                       (set! (.-dataBus cpu) v)
-                       (bus-cycle! cpu ppu)
-                       v))
-       :tick (fn [] (bus-cycle! cpu ppu))
-       :dmcDuringInstruction (fn []
-                               (let [f (.-_dmcFetchCycles cpu)]
-                                 (and (pos? f) (<= f (.-instrBusCycles cpu)))))})
+  (reify core/Bus
+    (fetch [_ a]
+      ;; what jsnes's emulate() does to fetch an opcode
+      (let [op (.loadFromCartridge cpu a)]
+        (set! (.-dataBus cpu) op)
+        (set! (.-instrBusCycles cpu) 1)
+        (.advanceDots ppu 3)
+        op))
+    (read-operand [_ a] (.loadDirect cpu a))
+    (read16 [_ a] (.load16bit cpu a))
+    (read [_ a] (.load cpu a))
+    (write [_ a v] (.write cpu a v))
+    ;; jsnes's push and pull move its own stack pointer: hand them ours
+    (push [_ sp v] (set! (.-REG_SP cpu) sp) (.push cpu v))
+    (pull [_ sp] (set! (.-REG_SP cpu) sp) (.pull cpu))
+    (read-vector [_ a]
+      (let [v (.loadFromCartridge cpu a)]
+        (set! (.-dataBus cpu) v)
+        (bus-cycle! cpu ppu)
+        v))
+    (tick [_] (bus-cycle! cpu ppu))
+    (dmc-during-instruction? [_]
+      (let [f (.-_dmcFetchCycles cpu)]
+        (and (pos? f) (<= f (.-instrBusCycles cpu)))))))
 
 (defn install!
   "Run `nes`'s (a jsnes NES) CPU with the ClojureScript 6502 from now on.
