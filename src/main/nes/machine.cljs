@@ -226,17 +226,17 @@
 (defn- bus-for
   "The bus nes.cpu.core runs on (see its namespace docstring)."
   [m ^js s]
-  (let [rd (fn [a] (read! m s a))]
-    #js {:fetch rd
-         :readOperand rd
-         :read rd
-         :read16 (fn [a] (let [lo (rd a)] (bit-or lo (bit-shift-left (rd (bit-and (inc a) 0xFFFF)) 8))))
-         :write (fn [a v] (write! m s a v))
-         :push (fn [sp v] (write! m s (bit-or 0x100 sp) v))
-         :pull (fn [sp] (rd (bit-or 0x100 (bit-and (inc sp) 0xFF))))
-         :readVector rd
-         :tick (fn [] (set! (.-bus s) (inc (.-bus s))) (cycle! m s))
-         :dmcDuringInstruction (fn [] false)}))
+  (reify cpu/Bus
+    (fetch [_ a] (read! m s a))
+    (read-operand [_ a] (read! m s a))
+    (read [_ a] (read! m s a))
+    (read16 [_ a] (let [lo (read! m s a)] (bit-or lo (bit-shift-left (read! m s (bit-and (inc a) 0xFFFF)) 8))))
+    (write [_ a v] (write! m s a v))
+    (push [_ sp v] (write! m s (bit-or 0x100 sp) v))
+    (pull [_ sp] (read! m s (bit-or 0x100 (bit-and (inc sp) 0xFF))))
+    (read-vector [_ a] (read! m s a))
+    (tick [_] (set! (.-bus s) (inc (.-bus s))) (cycle! m s))
+    (dmc-during-instruction? [_] false)))
 
 ;; ---------------------------------------------------------------------------
 ;; Power, reset, and running
