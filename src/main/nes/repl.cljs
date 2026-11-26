@@ -47,22 +47,22 @@
   Reading never has side effects: `rd` on an I/O register like $2002
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
-            [nes.console :as console]
+            [nes.app.console :as console]
             [nes.breakpoints :as bp]
-            [nes.chr :as chr]
+            [nes.inspect.chr :as chr]
             [nes.code-log :as code-log]
             [zeropage.disasm :as disasm]
-            [nes.debug-info :as debug-info]
+            [nes.inspect.debug-info :as debug-info]
             [nes.emulator :as emu]
-            [nes.lens :as lens]
-            [nes.overlay :as overlay]
+            [nes.inspect.lens :as lens]
+            [nes.inspect.overlay :as overlay]
             ;; game-specific lenses register themselves when loaded
-            [nes.lenses.croom]
-            [nes.lenses.megaman2]
-            [nes.lenses.zelda]
-            [nes.snapshot :as snapshot]
-            [nes.state :refer [db]]
-            [nes.text-table :as text-table]))
+            [nes.inspect.lenses.croom]
+            [nes.inspect.lenses.megaman2]
+            [nes.inspect.lenses.zelda]
+            [nes.inspect.snapshot :as snapshot]
+            [nes.app.state :refer [db]]
+            [nes.inspect.text-table :as text-table]))
 
 (defn- emulator []
   (or (console/emulator-instance)
@@ -77,7 +77,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Names
 ;;
-;; A game that comes with a names file (see nes.debug-info and `load!`)
+;; A game that comes with a names file (see nes.inspect.debug-info and `load!`)
 ;; has names for its variables and the labels in its code. Wherever these tools take a CPU address, they take
 ;; a name too: (rd :player/x), (break! :main), (dis :nmi).
 
@@ -288,17 +288,17 @@
 
 (defn snap
   "The whole machine's state right now, as an immutable value.
-  See nes.snapshot."
+  See nes.inspect.snapshot."
   []
   (let [{:keys [header name sha1]} (:rom @db)]
     (snapshot/capture (emulator) (assoc header :name name :sha1 sha1))))
 
 (def diff
-  "Bytes that differ between two snapshots. See nes.snapshot/diff."
+  "Bytes that differ between two snapshots. See nes.inspect.snapshot/diff."
   snapshot/diff)
 
 (def search
-  "Addresses that changed as `pred` says across snapshots. See nes.snapshot/search."
+  "Addresses that changed as `pred` says across snapshots. See nes.inspect.snapshot/search."
   snapshot/search)
 
 (defn print-diff
@@ -328,13 +328,13 @@
                       {:lens lens-name}))))
 
 (defn register-lens!
-  "Add a lens: a map with :rom, :name and :fields (see nes.lens), or the
+  "Add a lens: a map with :rom, :name and :fields (see nes.inspect.lens), or the
   older (register-lens! rom-name fields)."
   ([entry] (lens/register! entry))
   ([rom-name fields] (lens/register! rom-name fields)))
 
 (defn lens!
-  "Try out a lens on the loaded game: register `fields` (see nes.lens) as
+  "Try out a lens on the loaded game: register `fields` (see nes.inspect.lens) as
   a lens called `lens-name` (default \"REPL\") for this ROM, by its hash,
   and show it in the Lens tab. Run it again with changes to update it."
   ([fields] (lens! "REPL" fields))
@@ -376,7 +376,7 @@
 
 (defn screen-text
   "The text on screen now, read through text table `table-name` (one
-  registered for this game, see nes.text-table), as a vector of lines.
+  registered for this game, see nes.inspect.text-table), as a vector of lines.
   With no name, the first table registered for the game."
   ([] (screen-text (:name (first (text-table/tables-for (rom))))))
   ([table-name]
@@ -462,8 +462,8 @@
           (overlay/overlays-for (:rom @db)))))
 
 (defn overlay!
-  "Draw over the game's picture. `fields` is a lens (see nes.lens) and
-  `draw` a function from its values to shapes (see nes.overlay):
+  "Draw over the game's picture. `fields` is a lens (see nes.inspect.lens) and
+  `draw` a function from its values to shapes (see nes.inspect.overlay):
 
     (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}
               (fn [{:keys [x y]}] [[:rect {:x x :y y :w 16 :h 16 :color :red}]]))

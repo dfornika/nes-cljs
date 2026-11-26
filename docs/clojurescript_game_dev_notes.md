@@ -43,7 +43,7 @@ transforming data is what Clojure is good at.
 
 The more that can be computed in the first column, the less the second has
 to do. NES programmers did this by hand: Mega Man 2's damage tables and
-speeds (see `src/main/nes/lenses/megaman2.cljs`) are values precomputed and
+speeds (see `src/main/nes/inspect/lenses/megaman2.cljs`) are values precomputed and
 baked into the ROM.
 
 ## Walking up the abstraction ladder

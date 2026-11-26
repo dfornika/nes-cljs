@@ -8,7 +8,7 @@
   (:require [nes.util :as util]
             [clojure.string :as str]
             [zeropage.opcodes :as ops]
-            [nes.registers :as registers]))
+            [nes.io-registers :as registers]))
 
 (def categories
   "Instruction groups, in the order to show them."

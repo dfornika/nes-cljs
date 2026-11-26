@@ -13,11 +13,11 @@ Each game is two files:
   RAM, and what each one is for. The Samples menu loads it alongside the
   ROM, so the CPU tab can say `STA player.x` instead of `STA $04` and the
   Lens tab can show the game's variables. The format is described in
-  `nes.debug-info`.
+  `nes.inspect.debug-info`.
 
 These files are also the test cartridges for `nes.machine-test`,
 `nes.ppu.render-jsnes-test`, `nes.ppu.jsnes-compare-test` and
-`nes.debug-info-test` (read by `nes.sample-roms`). If you rebuild them,
+`nes.inspect.debug-info-test` (read by `nes.sample-roms`). If you rebuild them,
 run `npm test`.
 
 | Files | Source in the toolkit repo |

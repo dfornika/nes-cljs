@@ -63,7 +63,7 @@ committed to; pick whatever looks fun.
 
 ## Debugging tools
 
-- [x] **Overlays** – `nes.overlay`: shapes (boxes, lines, circles, text) drawn over the game's
+- [x] **Overlays** – `nes.inspect.overlay`: shapes (boxes, lines, circles, text) drawn over the game's
   picture from lens values, as data; checkboxes under the screen; `(overlay! name fields draw)`
   at the REPL. "Sprites" boxes every sprite in any game; a game built here can bring its own
   (Catch the Stars shows the squares it compares to decide what's touching)
@@ -213,7 +213,7 @@ played. So combine them.
     for our console; remembering the emulator choice between visits
   - [x] **Step 5: compare with jsnes in the app** – the CPU tab's "Check against jsnes as you
     play": jsnes runs beside our console with the same buttons, RAM and pictures are compared
-    every frame (`nes.compare`), and the game pauses at the first difference with both pictures,
+    every frame (`nes.inspect.compare`), and the game pauses at the first difference with both pictures,
     a diff and the RAM that differs. `nes.machine-test` now uses the same rules, from power on
     (ours starts with jsnes's RAM). One more jsnes difference: lines drawn with drawing off show
     the backdrop as it was when the frame began
@@ -234,7 +234,7 @@ played. So combine them.
       left out of `nes.machine-test`: jsnes leaves line 0 black (ours draws it like line 1),
       and draws the title screen's character (8x16 sprites from tile RAM) scrambled, where
       ours looks clean. Probably jsnes in both cases, but check against hardware behaviour
-      (or Mesen) before calling it, and add them to `nes.compare` if so
+      (or Mesen) before calling it, and add them to `nes.inspect.compare` if so
     - [ ] Mapper 3 (CNROM), mapper 1 (MMC1), mapper 4 (MMC3)
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
@@ -251,7 +251,7 @@ their own repository, <https://github.com/dfornika/nes-gamedev-toolkit-clj>.
 generators, subroutines, analysis) and `cartridj` (ROMs, tiles, palettes,
 the runtime and engine pieces). nes-cljs depends on neither. It plays the
 games as prebuilt `.nes` files with a names file beside each one
-(`resources/public/roms/cartridj`, read by `nes.debug-info`). The toolkit
+(`resources/public/roms/cartridj`, read by `nes.inspect.debug-info`). The toolkit
 side depends on nes-cljs: its REPL workbench uses nes-cljs's console, and
 its CPU tests use `nes.cpu.core`. The list below is kept as history; new
 toolkit work is tracked in that repo. The opcode table and disassembler
@@ -277,7 +277,7 @@ The plan is in `docs/clojurescript_game_dev_notes.md`.
   on the ClojureScript CPU in `npm test`, with cycle counts
 - [x] **Memory and symbols** – `gamedev-toolkit.memory/allocate`: declare variables as data
   (`:u8`, `:u16`, enums, bits, arrays, structs, structures of arrays) and it places them, zero
-  page first. A built game brings a "Variables" lens and its names (`nes.debug-info`,
+  page first. A built game brings a "Variables" lens and its names (`nes.inspect.debug-info`,
   `nes.workbench`): `STA player.x` and `main:` in the CPU tab, breakpoints by name,
   `(rd :player/x)` `(break! :main)` `(dis :nmi)` `(syms)` at the REPL
 - [ ] **Memory follow-ups** – put the most-used variables in the zero page
@@ -474,8 +474,8 @@ a JVM emulator could reuse it one day.
   so they wait for the portable CPU core
 - [ ] **A portable CPU core** – `nes.cpu.core` keeps its registers in a JS object for speed;
   a `deftype` with mutable fields and a bus protocol would work on both. nestest guards it
-- [ ] **`nes.zip`** – unzipping uses the browser's `DecompressionStream`; the JVM has `java.util.zip`
-- [ ] **Split `nes.console`** into a portable controller (run, step, breakpoints) and the
+- [ ] **`nes.app.zip`** – unzipping uses the browser's `DecompressionStream`; the JVM has `java.util.zip`
+- [ ] **Split `nes.app.console`** into a portable controller (run, step, breakpoints) and the
   browser's driver (animation frames, audio, Reagent state)
 - [ ] **Views: what to show, separately from how** – so another front end (HumbleUI?) can
   reuse the rows of the disassembly, the stack, the lens values, the schematic's layout

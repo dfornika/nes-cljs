@@ -2,12 +2,12 @@
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [reagent.core :as r]
             [reagent.dom.client :as rdomc]
-            [nes.app :as app]
-            [nes.input :as input]
-            [nes.sound :as sound]
+            [nes.ui.app :as app]
+            [nes.app.input :as input]
+            [nes.app.sound :as sound]
             ;; not used here, but loaded so it's ready at the REPL
             [nes.repl]
-            [nes.state :refer [db reload-count]]
+            [nes.app.state :refer [db reload-count]]
             [cljs-http.client :as http]
             [cljs.core.async :refer [<!]]))
 

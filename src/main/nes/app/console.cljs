@@ -1,0 +1,692 @@
+(ns nes.app.console
+  "The virtual console: one emulator, the cartridge in it, and the loop
+  that keeps it running.
+
+  The emulator itself lives in a plain atom, outside the Reagent `db`, so
+  that running it 60 times a second doesn't re-render the page. Only
+  things the page shows (what ROM is loaded, whether it's running) go in
+  `db`."
+  (:require [reagent.core :as r]
+            [nes.app.audio :as audio]
+            [nes.breakpoints :as bp]
+            [nes.inspect.compare :as compare]
+            [zeropage.disasm :as disasm]
+            [nes.inspect.debug-info :as debug-info]
+            [nes.emulator :as emu]
+            [nes.emulator.jsnes :as jsnes]
+            [nes.emulator.machine :as machine]
+            [nes.rom :as rom]
+            [nes.app.screen :as screen]
+            [nes.app.state :refer [db]]
+            [nes.app.zip :as zip]))
+
+(defonce ^:private emulator (atom nil))
+
+;; Whether to watch the CPU's bus (for the schematic). Kept here so a newly
+;; loaded emulator gets the same setting.
+(defonce ^:private bus-monitor? (atom false))
+
+;; Whether to record the code/data log (see nes.code-log), likewise kept
+;; for ROMs loaded later.
+(defonce ^:private code-logging? (atom false))
+
+;; Which CPU runs the game: :jsnes or :cljs (see nes.emulator/CpuChoice),
+;; kept for ROMs loaded later.
+(defonce ^:private cpu-choice (atom :jsnes))
+
+;; Which emulator runs the game: :jsnes, or :nes-cljs (NES.cljs's own
+;; console, nes.machine: our CPU and PPU). Kept for ROMs loaded later.
+(defonce ^:private machine-choice (atom :jsnes))
+
+;; The ROM loaded last, as loaded, so switching emulators can load it again
+(defonce ^:private last-rom (atom nil))
+
+(defn emulator-instance
+  "The current emulator, for poking at from the REPL."
+  []
+  @emulator)
+
+;; Inspector panels (tile viewer, memory watch...) show the emulator's
+;; memory, which changes constantly. Rather than redraw them every frame,
+;; they deref this, and we bump it about 10 times a second while running,
+;; and whenever something happens while paused (step, reset, load).
+(defonce inspect-tick (r/atom 0))
+
+(def ^:private inspect-interval-ms 100)
+
+(defonce ^:private last-inspect (atom 0))
+
+;; When the bus monitor is on: what happened on the bus since the previous
+;; refresh, and a rolling log of I/O register accesses.
+(defonce bus-activity (r/atom nil))
+(defonce bus-log (r/atom []))
+(def ^:private bus-log-size 200)
+(defonce ^:private last-sample-ms (atom nil))
+
+(defn- sample-bus!
+  "Collect the bus activity since the last sample. `kind` is :step if
+  it covers exactly one step taken while paused, otherwise :tick."
+  [kind]
+  (when-let [e @emulator]
+    (when-let [activity (emu/take-bus-activity! e)]
+      (let [now (js/performance.now)
+            elapsed (if-let [t @last-sample-ms] (- now t) 0)
+            frame (:frame (emu/ppu-state e))]
+        (reset! last-sample-ms now)
+        (reset! bus-activity (assoc activity :kind kind :elapsed-ms elapsed))
+        (when (seq (:events activity))
+          (swap! bus-log (fn [log]
+                           (let [log (into log (map #(assoc % :frame frame)) (:events activity))]
+                             (if (> (count log) bus-log-size)
+                               (subvec log (- (count log) bus-log-size))
+                               log)))))))))
+
+(defn monitor-bus!
+  "Turn bus monitoring on or off, now and for ROMs loaded later."
+  [on?]
+  (reset! bus-monitor? on?)
+  (reset! last-sample-ms nil)
+  (when-let [e @emulator] (emu/monitor-bus! e on?)))
+
+(defn log-code!
+  "Start or stop recording the code/data log, now and for ROMs loaded later."
+  [on?]
+  (reset! code-logging? on?)
+  (when-let [e @emulator] (emu/log-code! e on?))
+  (swap! db assoc :code-logging? on?))
+
+(defn use-cpu!
+  "Run the game's CPU with :jsnes or :cljs (NES.cljs's own), now and for
+  ROMs loaded later."
+  [which]
+  (reset! cpu-choice which)
+  (when-let [e @emulator] (emu/use-cpu! e which))
+  (swap! db assoc :cpu which))
+
+(defn- frame-hash
+  "A quick fingerprint of a frame and the CPU's RAM, for comparing."
+  [^js pixels ^js ram]
+  (let [h (volatile! 17)]
+    (dotimes [i (.-length pixels)] (vreset! h (bit-or (+ (* @h 31) (aget pixels i)) 0)))
+    (dotimes [i 0x800] (vreset! h (bit-or (+ (* @h 31) (aget ram i)) 0)))
+    @h))
+
+(defn compare-cpus!
+  "Run the loaded game twice from power on, once with each CPU, for
+  `frames` frames with no buttons pressed, comparing the picture and RAM
+  after every frame. Progress and the result go in `db` under
+  :cpu-compare. Runs in small chunks, so the page stays responsive."
+  [frames]
+  (when-let [e @emulator]
+    (let [bytes (emu/rom-file e)
+          make (fn [which]
+                 (let [last-frame (atom nil)
+                       x (jsnes/create {:on-frame #(reset! last-frame (js/Uint32Array.from %))})]
+                   (emu/load-rom! x bytes)
+                   (emu/use-cpu! x which)
+                   {:emu x :frame last-frame :ms 0}))
+          runs (atom {:jsnes (make :jsnes) :cljs (make :cljs)})
+          run-frame! (fn [k]
+                       (let [{:keys [emu frame]} (@runs k)
+                             t0 (js/performance.now)]
+                         (emu/frame! emu)
+                         (swap! runs update-in [k :ms] + (- (js/performance.now) t0))
+                         (frame-hash @frame (.. ^js (:nes emu) -cpu -mem))))]
+      (swap! db assoc :cpu-compare {:running? true :frame 0 :of frames})
+      (letfn [(chunk [n]
+                (let [result (loop [i 0 n n]
+                               (cond
+                                 (= n frames) {:same-for n}
+                                 (= i 20) {:continue n}
+                                 :else (let [a (run-frame! :jsnes) b (run-frame! :cljs)]
+                                         (if (= a b) (recur (inc i) (inc n)) {:differs-at (inc n)}))))]
+                  (if-let [n (:continue result)]
+                    (do (swap! db assoc-in [:cpu-compare :frame] n)
+                        (js/setTimeout #(chunk n) 0))
+                    (let [{:keys [jsnes cljs]} @runs]
+                      (swap! db assoc :cpu-compare
+                             (merge result {:running? false :of frames
+                                            :jsnes-ms (:ms jsnes) :cljs-ms (:ms cljs)
+                                            :stats (emu/cpu-stats (:emu cljs))}))))))]
+        (chunk 0)))))
+
+(defn clear-code-log! []
+  (when-let [e @emulator] (emu/clear-code-log! e)))
+
+(defn code-log
+  "The code/data log so far (see nes.emulator/code-log), or nil."
+  []
+  (some-> @emulator emu/code-log))
+
+;; Bumped after every frame, but only while something needs to keep up
+;; with every frame (an overlay is showing: see nes.ui.overlay).
+(defonce frame-tick (r/atom 0))
+
+(defn refresh-inspectors!
+  ([] (refresh-inspectors! :tick))
+  ([kind]
+   (when @bus-monitor? (sample-bus! kind))
+   (swap! inspect-tick inc)))
+
+;; ---------------------------------------------------------------------------
+;; Checking our console against jsnes, as you play (see nes.inspect.compare)
+;;
+;; While checking, jsnes runs beside our console as a 'shadow': it gets the
+;; same buttons, runs a frame after each of ours, and the two are compared.
+;; `shadow` holds {:emu jsnes, :ours and :theirs (atoms of their last
+;; pictures), :frames (an atom: how many frames were the same)}. What the
+;; CPU tab shows goes in `db` under :compare.
+
+(defonce ^:private shadow (atom nil))
+
+(defn compared-frames
+  "How many frames have been the same so far, while checking; else nil."
+  []
+  (some-> @shadow :frames deref))
+
+(defn stop-comparing!
+  "Stop checking against jsnes, saying `why` (in words)."
+  [why]
+  (when-let [{:keys [frames]} @shadow]
+    (reset! shadow nil)
+    (swap! db assoc :compare {:stopped why :frames @frames})))
+
+(defn- check-frame!
+  "Our console has just finished a frame: run jsnes's, and compare. Returns
+  true (and stops checking) if they differ."
+  []
+  (when-let [{:keys [emu ours theirs frames]} @shadow]
+    (emu/frame! emu)
+    (let [e @emulator
+          mask (:mask (emu/ppu-registers emu))
+          fine-x (bit-and (:x (:scroll (emu/ppu-state emu))) 7)
+          drawn (machine/lines-drawn e)
+          pixels (compare/picture-diffs @ours @theirs mask fine-x drawn)
+          ram (compare/ram-diffs #(emu/cpu-peek e %) #(emu/cpu-peek emu %))]
+      (if (and (empty? pixels) (empty? ram))
+        (do (swap! frames inc) false)
+        (do (reset! shadow nil)
+            (swap! db assoc :compare
+                   {:result {:frame (inc @frames)
+                             :pixels (count pixels)
+                             :ram ram
+                             :ours @ours
+                             :theirs @theirs
+                             :diff (compare/difference-picture! (js/Uint32Array. (* 256 240))
+                                                               @ours pixels mask fine-x drawn)}})
+            true)))))
+
+(defn- stop-at-difference!
+  "The two differ: pause, and show the CPU tab, where the difference is."
+  []
+  (swap! db assoc :status :paused :inspector-tab :cpu)
+  (audio/clear!)
+  (refresh-inspectors!))
+
+;; ---------------------------------------------------------------------------
+;; Timing
+;;
+;; The NES draws about 60.1 frames per second. The browser asks us to draw
+;; whenever the monitor refreshes, which might be 60, 120 or 144 times a
+;; second. So on each refresh we work out how much time has passed and run
+;; however many NES frames fit in it.
+
+(def frame-ms (/ 1000 60.0988))
+
+;; If the tab was in the background (where the browser stops calling us)
+;; we don't want to run hundreds of frames to catch up when it comes back.
+(def ^:private max-frames-per-tick 4)
+
+(defonce ^:private clock (atom {:last-ts nil :behind-ms 0 :raf-id nil}))
+
+(declare tick)
+
+(defn- schedule! []
+  ;; Call `tick` through its name (not as a captured value) so hot
+  ;; reloading a new version of `tick` takes effect on the next frame.
+  (swap! clock assoc :raf-id (js/requestAnimationFrame (fn [ts] (tick ts)))))
+
+(defn running? []
+  (= :running (:status @db)))
+
+;; ---------------------------------------------------------------------------
+;; Speed
+;;
+;; Slow motion and fast-forward: at speed 2 we run twice as many frames per
+;; second of real time. Sound is muted at any speed but 1 (sped-up or
+;; slowed-down sound would need resampling; for now it's just switched off).
+
+(def speeds [0.25 0.5 1 2 4])
+
+(defonce ^:private sound-live? (atom true))
+
+(defn speed [] (or (:speed @db) 1))
+
+(defn set-speed!
+  "Run at `s` times normal speed (see `speeds`)."
+  [s]
+  (swap! db assoc :speed s)
+  (reset! sound-live? (= s 1))
+  (audio/clear!)
+  s)
+
+(defn- on-audio-sample [left right]
+  (when @sound-live? (audio/on-sample! left right)))
+
+;; Something to call before each batch of frames, to read gamepads. Set by
+;; nes.app.input (which depends on this namespace, so can't be called directly).
+(defonce input-poller (atom nil))
+
+(declare stop-at-breakpoint!)
+
+(defn- tick [ts]
+  (when (running?)
+    (let [{:keys [last-ts behind-ms]} @clock
+          s (speed)
+          elapsed (* s (if last-ts (- ts last-ts) frame-ms))
+          behind (min (+ behind-ms elapsed) (* max-frames-per-tick (max 1 s) frame-ms))
+          frames (js/Math.floor (/ behind frame-ms))]
+      (try
+        (when-let [poll @input-poller] (poll))
+        (if-let [hit (loop [n frames]
+                       (when (pos? n)
+                         (or (emu/frame! @emulator)
+                             (when (check-frame!) :differs)
+                             (recur (dec n)))))]
+          (if (= hit :differs) (stop-at-difference!) (stop-at-breakpoint! hit))
+          (do
+            (when (and (pos? frames) (seq (:overlays @db)))
+              (swap! frame-tick inc))
+            (when (>= (- ts @last-inspect) inspect-interval-ms)
+              (reset! last-inspect ts)
+              (refresh-inspectors!))
+            (swap! clock assoc :last-ts ts :behind-ms (- behind (* frames frame-ms)))
+            (schedule!)))
+        (catch :default e
+          (js/console.error e)
+          (swap! db assoc :status :crashed :error (ex-message e)))))))
+
+;; ---------------------------------------------------------------------------
+;; Controls
+
+(defn pause! []
+  (when-let [id (:raf-id @clock)] (js/cancelAnimationFrame id))
+  (when (running?) (swap! db assoc :status :paused))
+  (audio/clear!)
+  (refresh-inspectors!))
+
+;; The last few instructions run with Step instruction (decoded, see
+;; zeropage.disasm), oldest first, so the CPU tab can show where you've just
+;; been. Anything else that runs the game (Run, Step frame...) empties it:
+;; too much has happened since to call them 'the last few'.
+(defonce recent-steps (r/atom []))
+
+(def recent-steps-kept 3)
+
+(defn resume! []
+  (when (and @emulator (#{:paused} (:status @db)))
+    (reset! recent-steps [])
+    (swap! db assoc :status :running :break nil)
+    (swap! clock assoc :last-ts nil :behind-ms 0)
+    (schedule!)))
+
+;; ---------------------------------------------------------------------------
+;; Breakpoints
+;;
+;; The list lives in `db` (so the page shows it) under :breakpoints, and is
+;; handed to the emulator whenever it changes. See nes.breakpoints.
+
+(defn breakpoints [] (:breakpoints @db []))
+
+(defn- sync-breakpoints! []
+  (when-let [e @emulator]
+    (emu/set-breakpoints! e (breakpoints))))
+
+(defonce ^:private breakpoint-watch
+  (do (add-watch db ::breakpoints
+                 (fn [_ _ old new]
+                   (when-not (identical? (:breakpoints old) (:breakpoints new))
+                     (sync-breakpoints!))))
+      true))
+
+(defn add-breakpoint!
+  "Add a breakpoint (a map with at least :kind and :addr, see
+  nes.breakpoints). Returns its id."
+  [b]
+  (let [id (inc (:next-breakpoint-id @db 0))]
+    (swap! db (fn [d]
+                (-> d
+                    (assoc :next-breakpoint-id id)
+                    (update :breakpoints (fnil conj [])
+                            (merge {:enabled? true :hits 0} b {:id id})))))
+    id))
+
+(defn update-breakpoint! [id f & args]
+  (swap! db update :breakpoints
+         (fn [bps] (mapv #(if (= id (:id %)) (apply f % args) %) bps))))
+
+(defn remove-breakpoint! [id]
+  (swap! db update :breakpoints (fn [bps] (filterv #(not= id (:id %)) bps))))
+
+(defn clear-breakpoints! []
+  (swap! db assoc :breakpoints []))
+
+(defn toggle-exec-breakpoint!
+  "Add an execute breakpoint at `addr`, or remove the one that's there."
+  [addr]
+  (if-let [b (some #(when (and (= :exec (:kind %)) (= addr (:addr %)) (nil? (:end %))) %)
+                   (breakpoints))]
+    (remove-breakpoint! (:id b))
+    (add-breakpoint! {:kind :exec :addr addr})))
+
+(defn- show-picture-so-far!
+  "After stepping: if the PPU is partway through the picture, show it
+  as far as it's drawn, with a marker where it's drawing. Otherwise show
+  the last finished frame."
+  [e]
+  (if-let [{:keys [pixels line]} (emu/picture-so-far! e)]
+    (screen/draw-partial! pixels line (:dot (emu/ppu-state e)))
+    (screen/redraw!)))
+
+(defn- stop-at-breakpoint!
+  "A breakpoint went off while running: pause there and say why."
+  [hit]
+  (when-let [id (get-in hit [:breakpoint :id])]
+    (update-breakpoint! id update :hits (fnil inc 0)))
+  (stop-comparing! "a breakpoint stopped the game partway through a frame")
+  (swap! db assoc :status :paused :break hit)
+  (audio/clear!)
+  (show-picture-so-far! @emulator)
+  (refresh-inspectors!))
+
+(defn break-reason
+  "Why the emulator last stopped at a breakpoint, in words, or nil."
+  []
+  (some-> (:break @db) bp/describe-hit))
+
+(defn while-paused!
+  "Run `f` on the emulator if it's paused, then refresh the inspectors.
+  Returns true if `f` ran."
+  [f]
+  (when (and @emulator (= :paused (:status @db)))
+    ;; Throw away activity from before this step, so the sample taken
+    ;; afterwards covers exactly this step.
+    (when @bus-monitor? (emu/take-bus-activity! @emulator))
+    ;; whatever stopped us before is old news after a step
+    (swap! db assoc :break nil)
+    (reset! recent-steps [])
+    (try
+      (f @emulator)
+      (show-picture-so-far! @emulator)
+      (catch :default e
+        (js/console.error e)
+        (swap! db assoc :status :crashed :error (ex-message e))))
+    (refresh-inspectors! :step)
+    true))
+
+(defn step-frame!
+  "Run until the end of the current frame (or a breakpoint), then stay
+  paused."
+  []
+  (while-paused! (fn [e]
+                   (if-let [hit (emu/frame! e)]
+                     (do (when-let [id (get-in hit [:breakpoint :id])]
+                           (update-breakpoint! id update :hits (fnil inc 0)))
+                         (stop-comparing! "a breakpoint stopped the game partway through a frame")
+                         (swap! db assoc :break hit))
+                     (when (check-frame!) (stop-at-difference!))))))
+
+(defn step-instruction!
+  "Run exactly one CPU instruction, then stay paused. The instruction is
+  remembered in `recent-steps`."
+  []
+  (stop-comparing! "the game was stepped an instruction at a time")
+  (let [before @recent-steps
+        instr (when-let [e @emulator]
+                (disasm/decode #(emu/cpu-peek e %) (:pc (emu/cpu-state e))))]
+    (when (while-paused! emu/step-instruction!)
+      (reset! recent-steps (vec (take-last recent-steps-kept (conj before instr)))))))
+
+(defn step-scanline-on!
+  "Run instructions until the PPU moves on to another scanline (at most a
+  frame's worth, in case it never does)."
+  [e]
+  (let [start (:scanline (emu/ppu-state e))]
+    (loop [i 0]
+      (when (and (< i 40000)
+                 (not (emu/step-instruction! e))
+                 (= start (:scanline (emu/ppu-state e))))
+        (recur (inc i))))))
+
+(defn step-scanline!
+  "Run until the PPU starts the next scanline (about 114 CPU cycles), then
+  stay paused."
+  []
+  (stop-comparing! "the game was stepped a line at a time")
+  (while-paused! step-scanline-on!))
+
+(defn reset-console! []
+  (stop-comparing! "Reset was pressed")
+  (when-let [e @emulator]
+    (emu/press-reset! e)
+    (reset! recent-steps [])
+    (refresh-inspectors!)
+    (when (= :crashed (:status @db))
+      (swap! db assoc :status :paused :error nil)
+      (resume!))))
+
+(defn write!
+  "Apply `writes` (a seq of {:space :cpu/:rom :addr :value}, as from
+  nes.inspect.lens/writes) to the running game, then refresh the inspectors.
+  :cpu writes go to RAM (other addresses can't be poked and are skipped);
+  :rom writes patch the cartridge. Returns the writes that worked."
+  [writes]
+  (stop-comparing! "memory was changed by hand")
+  (when-let [e @emulator]
+    (let [done (filterv (fn [{:keys [space addr value]}]
+                          (case space
+                            :cpu (emu/cpu-poke! e addr value)
+                            :rom (emu/rom-poke! e addr value)
+                            false))
+                        writes)
+          rom-changes (count (filter #(= :rom (:space %)) done))]
+      (when (pos? rom-changes)
+        (swap! db update-in [:rom :patched] (fnil + 0) rom-changes))
+      (refresh-inspectors! :step)
+      done)))
+
+(defn poke-tiles!
+  "Change bytes of tile graphics in the running game: `writes` is a seq
+  of [ppu-address value] (see nes.inspect.chr/pixel-writes). Returns where the
+  changes went: :rom (into the cartridge too), :live (only the PPU's
+  memory), or nil if nothing was written. See emu/tile-poke!."
+  [writes]
+  (stop-comparing! "tiles were changed by hand")
+  (when-let [e @emulator]
+    (let [results (doall (keep (fn [[addr value]] (emu/tile-poke! e addr value)) writes))
+          in-rom (count (filter #{:rom} results))]
+      (when (pos? in-rom)
+        (swap! db update-in [:rom :patched] (fnil + 0) in-rom))
+      (refresh-inspectors! :step)
+      (cond (pos? in-rom) :rom
+            (seq results) :live))))
+
+(defn download-rom!
+  "Save the cartridge, with any changes made to it, as a .nes file."
+  []
+  (when-let [e @emulator]
+    (let [name (-> (get-in @db [:rom :name] "game.nes") (.replace (js/RegExp. "\\.nes$" "i") ""))
+          url (js/URL.createObjectURL (js/Blob. #js [(emu/rom-file e)]
+                                                #js {:type "application/octet-stream"}))
+          a (js/document.createElement "a")]
+      (set! (.-href a) url)
+      (set! (.-download a) (str name " (patched).nes"))
+      (.click a)
+      (js/setTimeout #(js/URL.revokeObjectURL url) 1000))))
+
+(defn button-down! [player button]
+  (when-let [e @emulator] (emu/button-down! e player button))
+  (when-let [{e :emu} @shadow] (emu/button-down! e player button)))
+
+(defn button-up! [player button]
+  (when-let [e @emulator] (emu/button-up! e player button))
+  (when-let [{e :emu} @shadow] (emu/button-up! e player button)))
+
+;; ---------------------------------------------------------------------------
+;; Loading cartridges
+
+(defn load-bytes!
+  "Insert the ROM in `bytes` (a Uint8Array) and start it running.
+  `rom-name` is just for display."
+  [rom-name ^js bytes]
+  (pause!)
+  (stop-comparing! "another game was loaded")
+  (reset! last-rom {:name rom-name :bytes bytes})
+  (if-let [header (rom/parse-header bytes)]
+    (try
+      (let [on-frame (fn [pixels]
+                       (screen/draw! pixels)
+                       ;; while checking against jsnes: keep a copy of our picture
+                       (when-let [{:keys [ours]} @shadow]
+                         (reset! ours (js/Uint32Array.from pixels))))
+            e ((if (= @machine-choice :nes-cljs) machine/create jsnes/create) {:on-frame on-frame})]
+        (emu/set-audio-sink! e on-audio-sample)
+        (emu/load-rom! e bytes)
+        (emu/monitor-bus! e @bus-monitor?)
+        (emu/set-breakpoints! e (breakpoints))
+        (emu/log-code! e @code-logging?)
+        (emu/use-cpu! e @cpu-choice)
+        (reset! emulator e)
+        (reset! bus-log [])
+        (reset! bus-activity nil)
+        (reset! recent-steps [])
+        (swap! db assoc
+               :rom {:name rom-name :size (.-length bytes) :header header
+                     :sha1 (rom/rom-hash bytes)}
+               :status :paused
+               :overlays #{}
+               :error nil)
+        (resume!))
+      (catch :default err
+        (screen/clear!)
+        (reset! emulator nil)
+        (swap! db assoc :rom nil :status :empty
+               :error (str "Couldn't load " rom-name ": " (ex-message err)))))
+    (swap! db assoc :error (str rom-name " isn't an iNES (.nes) file."))))
+
+(defn use-machine!
+  "Run games on :jsnes or :nes-cljs (NES.cljs's own console), now and for
+  ROMs loaded later. The game loaded now starts again from power on."
+  [which]
+  (reset! machine-choice which)
+  (swap! db assoc :machine which)
+  (when-let [{:keys [name bytes]} @last-rom]
+    (load-bytes! name bytes)))
+
+(defn compare!
+  "Start the loaded game again on our console, with jsnes beside it, fed
+  the same buttons; after every frame, compare their RAM and pictures (see
+  nes.inspect.compare), and pause at the first difference."
+  []
+  (when-let [{:keys [name bytes]} @last-rom]
+    (reset! machine-choice :nes-cljs)
+    (swap! db assoc :machine :nes-cljs)
+    (load-bytes! name bytes)
+    (when-let [ours @emulator]
+      (let [theirs (atom nil)
+            them (jsnes/create {:on-frame #(reset! theirs (js/Uint32Array.from %))})]
+        (emu/load-rom! them bytes)
+        ;; set the two up to keep in step (see nes.inspect.compare)
+        (set! (.. ^js (:nes them) -ppu -clipToTvSize) false)
+        (machine/match-jsnes! ours)
+        (dotimes [a 0x800] (emu/cpu-poke! ours a (emu/cpu-peek them a)))
+        (reset! shadow {:emu them :ours (atom nil) :theirs theirs :frames (atom 0)})
+        (swap! db assoc :compare {:running? true})))))
+
+(defn machine-in-use
+  "Which emulator runs games: :jsnes or :nes-cljs."
+  []
+  @machine-choice)
+
+(defn- strip-gz [name] (.replace name (js/RegExp. "\\.gz$" "i") ""))
+
+;; The last zip file loaded, if it had more than one ROM in it, so the
+;; others can be loaded from the Cartridge tab: {:name :bytes :roms}
+(defonce ^:private archive (atom nil))
+
+(defn- fail! [message]
+  (swap! db assoc :error message))
+
+(defn load-from-archive!
+  "Load ROM `entry-name` from the zip loaded last."
+  [entry-name]
+  (when-let [{:keys [name bytes roms]} @archive]
+    (when-let [entry (some #(when (= entry-name (:name %)) %) roms)]
+      (-> (zip/extract bytes entry)
+          (.then (fn [rom]
+                   (load-bytes! (last (.split (:name entry) "/")) rom)
+                   (when (:rom @db)
+                     (swap! db update :rom assoc
+                            :archive name
+                            :archive-roms (mapv :name roms)
+                            :archive-entry (:name entry)))))
+          (.catch #(fail! (str "Couldn't unzip " entry-name ": " (ex-message %))))))))
+
+(defn load-any!
+  "Load a ROM from `bytes` (a Uint8Array) called `file-name`: a .nes file,
+  or a .zip or .gz with one inside."
+  [file-name ^js bytes]
+  (cond
+    (zip/zip? bytes)
+    (try
+      (let [roms (zip/roms (zip/entries bytes))]
+        (if (empty? roms)
+          (fail! (str "There's no .nes file in " file-name "."))
+          (do (reset! archive {:name file-name :bytes bytes :roms roms})
+              (load-from-archive! (:name (first roms))))))
+      (catch :default e
+        (fail! (str "Couldn't read " file-name ": " (ex-message e)))))
+
+    (zip/gzip? bytes)
+    (-> (zip/gunzip bytes)
+        (.then #(load-bytes! (strip-gz file-name) %))
+        (.catch #(fail! (str "Couldn't decompress " file-name ": " (ex-message %)))))
+
+    (zip/other-archive bytes)
+    (fail! (str file-name " is a " (zip/other-archive bytes) " archive, which can't be opened here. "
+                "Extract the .nes file from it first (or use a .zip)."))
+
+    :else (load-bytes! file-name bytes)))
+
+(defn load-file!
+  "Load a ROM from a browser File (from a file picker or drag-and-drop):
+  a .nes file, or a .zip or .gz with one inside."
+  [^js file]
+  (-> (.arrayBuffer file)
+      (.then #(load-any! (.-name file) (js/Uint8Array. %)))))
+
+(defn- fetch!
+  "A promise of what's at `url`: (.arrayBuffer response) or (.text response)."
+  [url read]
+  (-> (js/fetch url)
+      (.then (fn [^js resp]
+               (if (.-ok resp)
+                 (read resp)
+                 (throw (js/Error. (str "HTTP " (.-status resp) " for " url))))))))
+
+(defn load-url!
+  "Load a ROM from a URL (.nes, .zip or .gz). With `names-url`, also its
+  names file (see nes.inspect.debug-info), so the inspectors can use the game's
+  own names for its code and variables."
+  ([url] (load-url! url nil))
+  ([url names-url]
+   (-> (js/Promise.all
+        #js [(fetch! url #(.arrayBuffer ^js %))
+             (if names-url (fetch! names-url #(.text ^js %)) (js/Promise.resolve nil))])
+       (.then (fn [^js results]
+                (let [bytes (js/Uint8Array. (aget results 0))]
+                  ;; the names first, so they're there when the game's first shown
+                  (when-let [text (aget results 1)]
+                    (debug-info/install! (rom/rom-hash bytes) (debug-info/read-names text)))
+                  (load-any! (last (.split url "/")) bytes))))
+       (.catch #(swap! db assoc :error (str "Couldn't fetch " url ": " (ex-message %)))))))
