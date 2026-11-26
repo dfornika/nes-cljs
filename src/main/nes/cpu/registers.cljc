@@ -11,6 +11,14 @@
   path. That's why the register has to be written out as a keyword, not a
   value worked out while running (use `index` for that).
 
+  (Why macros, and not plain functions: we measured, on 2026-11-26 with
+  `npm run bench:cpu`. Plain functions with `^:const` slot numbers, as in
+  `(reg s A)`, ran our CPU about 4% slower inside jsnes; without
+  `^:const`, about 5%. Probably because nes.cpu.core/step! is one very
+  large function, and V8 only inlines so much into one function, so some
+  of its 170-odd register reads stay real calls. Our whole console showed no
+  difference: its PPU takes most of the time.)
+
   (Why an Int32Array, and not a plain JS array or a Float64Array: both of
   those made the CPU a few percent slower. Values in a Float64Array also
   come out as floating-point numbers, and once a float is written into a
