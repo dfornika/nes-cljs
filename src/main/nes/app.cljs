@@ -24,49 +24,46 @@
             [nes.memory-view :refer [memory-view]]
             [nes.state :refer [db dev-tools]]
             [nes.tiles-view :refer [tiles-view]]
-            [games.alienscape :as alienscape]
-            [games.catch :as catch]
-            [games.hello :as hello]
-            [games.hopper :as hopper]
-            [games.ladder :as ladder]
-            [games.star-run :as star-run]
-            [games.tower :as tower]
             [nes.touchpad :as touchpad]
-            [nes.ui :as ui]
-            [nes.workbench :as workbench]))
+            [nes.ui :as ui]))
 
 (def sample-roms
   [{:name "Star Run"
-    :build star-run/build
-    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/star_run.cljc"
+    :url "roms/cartridj/star-run.nes"
+    :names "roms/cartridj/star-run.debug.edn"
+    :about "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/star-run/src/cljc/star_run/core.cljc"
     :blurb "Star Tower's hopper on a level six screens wide: the background scrolls. Run right for the stars; mind the spikes and the pits. Start to play, A to jump, Up and Down on ladders."
-    :credit "written in ClojureScript, for NES.cljs"}
+    :credit "written in ClojureScript with cartridj"}
    {:name "Star Tower"
-    :build tower/build
-    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/tower.cljc"
+    :url "roms/cartridj/tower.nes"
+    :names "roms/cartridj/tower.debug.edn"
+    :about "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/tower/src/cljc/tower/core.cljc"
     :blurb "Star Hopper climbs: ladders, planks to jump up through, spikes that fall, and a tune. Start to play, Left and Right to run, A to jump (hold for higher), Up and Down on ladders."
-    :credit "written in ClojureScript, for NES.cljs"}
+    :credit "written in ClojureScript with cartridj"}
    {:name "Alienscape"
-    :build alienscape/build
-    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/alienscape.cljc"
+    :url "roms/cartridj/alienscape.nes"
+    :names "roms/cartridj/alienscape.debug.edn"
+    :about "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/alienscape/src/cljc/alienscape/core.cljc"
     :blurb "Star Hopper's rules in a room from Hexany's Alienscape: collect the orbs, mind the biters. Start to play, Left and Right to run, A to jump (high)."
-    :credit "art by Hexany Ives (CC0); written in ClojureScript, for NES.cljs"}
+    :credit "art by Hexany Ives (CC0); written in ClojureScript with cartridj"}
    {:name "Star Hopper"
-    :build hopper/build
-    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/hopper.cljc"
+    :url "roms/cartridj/hopper.nes"
+    :names "roms/cartridj/hopper.debug.edn"
+    :about "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/hopper/src/cljc/hopper/core.cljc"
     :blurb "A platform game on one screen: run and jump round the girders for the stars, and keep clear of the spikes. Start to play, Left and Right to run, A to jump."
-    :credit "written in ClojureScript, for NES.cljs"}
+    :credit "written in ClojureScript with cartridj"}
    {:name "Catch the Stars"
-    :build catch/build
-    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/catch.cljc"
+    :url "roms/cartridj/catch.nes"
+    :names "roms/cartridj/catch.debug.edn"
+    :about "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/catch/src/cljc/catch/core.cljc"
     :blurb "A small game: catch stars, dodge the spiky thing, which speeds up as you score. Start to play, D-pad to move."
-    :credit "written in ClojureScript, for NES.cljs"}
+    :credit "written in ClojureScript with cartridj"}
    {:name "Hello"
-    ;; no file: built in the page, from ClojureScript data, when clicked
-    :build hello/build
-    :about "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/hello.cljc"
-    :blurb "A face you can move with the D-pad; A changes the background. Assembled right here in the page when you click."
-    :credit "written in ClojureScript, for NES.cljs"}
+    :url "roms/cartridj/hello.nes"
+    :names "roms/cartridj/hello.debug.edn"
+    :about "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/hello/src/cljc/hello/core.cljc"
+    :blurb "A face you can move with the D-pad; A changes the background. The smallest program that feels like a game."
+    :credit "written in ClojureScript with cartridj"}
    {:name "Concentration Room"
     :url "roms/croom/croom.nes"
     :about "roms/croom/README.html"
@@ -82,6 +79,15 @@
     :about "https://github.com/pinobatch/240p-test-mini/tree/v0.23/nes"
     :blurb "Test patterns: grids, color bars, scrolling, sprites, sound. Good for poking at with the inspectors."
     :credit "by Damian Yerrick, after Artemio Urbina · GPL v2+"}])
+
+(def ^:private ladder-rungs
+  "The ladder's rungs, bottom first (their source: games/ladder in the
+  toolkit's repo)."
+  [{:id "nil"    :about "A valid cartridge that does nothing: one instruction, jumping to itself."}
+   {:id "color"  :about "One change to the picture: wait for the PPU, set the backdrop color, stop."}
+   {:id "pulse"  :about "The smallest game loop: a main loop and an NMI handler, in step. The color changes every 16 frames."}
+   {:id "pad"    :about "Input: Left and Right on the D-pad step through colors."}
+   {:id "sprite" :about "Something to move: a ball you steer with the D-pad."}])
 
 (defn- file-button
   "A button that opens the file chooser, through a hidden file input."
@@ -263,21 +269,6 @@
           " of the ROM (from the Lens tab, the Tiles tab or the REPL), in the running game. The changes last until you load another ROM. "
           [:a {:href "#" :on-click (fn [e] (.preventDefault e) (console/download-rom!))}
            "Download the changed ROM"]])
-       ;; the cartridge as text: see gamedev-toolkit.rom-edn
-       (let [link (fn [label title f]
-                    [:a {:href "#" :title title :on-click (fn [e] (.preventDefault e) (f))} label])
-             built (workbench/built-game (:sha1 (:rom @db)))]
-         [:div {:style {:margin-top "6px" :font-size "13px"}}
-          "Save as EDN (text): "
-          (when built
-            [:<> [link "the program" "Every instruction and tile drawing, as the assembler was given them. Only for games built here."
-                  #(workbench/save-edn! (:rom @db) :source)]
-             " · "])
-          [link "the bytes" "The cartridge's parts, as hexadecimal text. Works for any ROM."
-           #(workbench/save-edn! (:rom @db) :container)]
-          (when built
-            [:<> " · " [link "or as a .nes file" "The ROM file, to play in any emulator"
-                        #(workbench/save-nes! built)]])])
        [:table {:style {:margin-top "8px" :border-spacing "0 6px"}}
         [:tbody
          [row "PRG ROM" (str (kib prg-size) " (" prg-banks " × 16 KB)")
@@ -313,14 +304,12 @@
    [:h3 {:style {:margin-top 0}} "Sample ROMs"]
    [:p {:style {:color "#57606a" :font-size "13px"}}
     "Homebrew games and programs, free to share."]
-   (for [{:keys [name url build about blurb credit]} sample-roms]
+   (for [{:keys [name url names about blurb credit]} sample-roms]
      ^{:key name}
      [:div {:style {:margin-bottom "12px"}}
       [:button {:on-click (fn []
                             (hide-popover! "samples-menu")
-                            (if build
-                              (workbench/play! (build))
-                              (console/load-url! url)))
+                            (console/load-url! url names))
                 :style {:font-weight "bold"}}
        name]
       [:div {:style {:font-size "13px" :margin-top "3px"}} blurb]
@@ -332,15 +321,16 @@
     [:div {:style {:font-size "13px" :margin-bottom "6px"}}
      "From a cartridge that does nothing, up to something you can steer: each adds one idea. "
      "Small enough to step through in the CPU tab. "
-     [:a {:href "https://github.com/dfornika/nes-cljs/blob/main/src/main/games/ladder.cljc" :target "_blank"} "source"]]
+     [:a {:href "https://github.com/dfornika/nes-gamedev-toolkit-clj/blob/main/games/ladder/src/cljc/ladder/core.cljc" :target "_blank"} "source"]]
     [:div {:style {:display "flex" :gap "6px" :flex-wrap "wrap"}}
-     (for [{:keys [id about]} ladder/rungs]
+     (for [{:keys [id about]} ladder-rungs]
        ^{:key id}
        [:button {:title about
                  :on-click (fn []
                              (hide-popover! "samples-menu")
-                             (workbench/play! (ladder/build id)))}
-        (name id)])]]])
+                             (console/load-url! (str "roms/cartridj/ladder-" id ".nes")
+                                                (str "roms/cartridj/ladder-" id ".debug.edn")))}
+        id])]]])
 
 (def ^:private tabs
   [{:id :schematic :label "Schematic" :view schematic-view}

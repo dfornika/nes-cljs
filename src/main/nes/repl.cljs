@@ -34,35 +34,19 @@
     (lens! \"Player\" {:lives [:u8 0x075A]})  ; try out a lens; it shows in the Lens tab
     (lens-source \"Player\")   ; print it as code to paste into a file
 
-    (play! (ladder/build :nil))   ; the smallest cartridge; then :color :pulse :pad :sprite
-    (play! (hello/build))    ; build a game from ClojureScript (src/main/games/hello.cljc) and run it
-    (play! (catch/build))    ; a whole game: src/main/games/catch.cljc
-    (play! (hopper/build))   ; a platform game: src/main/games/hopper.cljc
-    (play! (alienscape/build))   ; the same rules, with art from a CC0 pack
-    (play! (tower/build))    ; ladders, one-way platforms, music
-    (play! (star-run/build)) ; a level wider than the screen
-    (save! (catch/build))    ; ...downloaded as a .nes file
-    (save-edn!)              ; the loaded game's program, as EDN text you can read
+    (load! \"catch\")         ; a sample game, with its names (resources/public/roms/cartridj)
+    (load! \"roms/croom/croom.nes\")   ; or any ROM the site serves
     (overlay! \"Box\" {:x [:u8 0x86] :y [:u8 0xCE]}      ; draw over the picture, from memory
               (fn [{:keys [x y]}] [[:rect {:x x :y y :w 16 :h 16}]]))
     (tile 0x2A)              ; a tile, as text: [\"..1111..\" ...]
     (tile! 0x2A [\"..1111..\" ...])   ; ...and drawn from text (or paint in the Tiles tab)
-    (syms)                   ; a game built here has names: its labels and variables
+    (syms)                   ; a game with a names file has names: its labels and variables
     (rd :player/x)           ; ...which work wherever an address does
     (break! :write :color) (dis :main)
-    (asm/assemble [[:lda [:imm 1]] [:rts]])   ; the assembler by itself
 
   Reading never has side effects: `rd` on an I/O register like $2002
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
-            [gamedev-toolkit.asm :as asm]
-            [games.alienscape :as alienscape]
-            [games.catch :as catch]
-            [games.hello :as hello]
-            [games.hopper :as hopper]
-            [games.ladder :as ladder]
-            [games.star-run :as star-run]
-            [games.tower :as tower]
             [nes.console :as console]
             [nes.breakpoints :as bp]
             [nes.chr :as chr]
@@ -78,8 +62,7 @@
             [nes.lenses.zelda]
             [nes.snapshot :as snapshot]
             [nes.state :refer [db]]
-            [nes.text-table :as text-table]
-            [nes.workbench :as workbench]))
+            [nes.text-table :as text-table]))
 
 (defn- emulator []
   (or (console/emulator-instance)
@@ -94,8 +77,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Names
 ;;
-;; A game built here (see `play!`) has names for its variables and the
-;; labels in its code. Wherever these tools take a CPU address, they take
+;; A game that comes with a names file (see nes.debug-info and `load!`)
+;; has names for its variables and the labels in its code. Wherever these tools take a CPU address, they take
 ;; a name too: (rd :player/x), (break! :main), (dis :nmi).
 
 (defn- symbol-table []
@@ -109,7 +92,7 @@
     x
     (or (debug-info/address (symbol-table) x)
         (throw (ex-info (str "The loaded game has nothing called " (pr-str x)
-                             (when-not (symbol-table) ". (Only games built here have names: see play!)"))
+                             (when-not (symbol-table) ". (Only games with a names file have names: see load!)"))
                         {:name x})))))
 
 (defn syms
@@ -430,38 +413,30 @@
   (tap> (snap)))
 
 ;; ---------------------------------------------------------------------------
-;; Games built here
+;; Loading
 
-(defn play!
-  "Put a cartridge built with gamedev-toolkit into the console and start
-  it: (play! (hello/build)). Takes what a game's `build` returns (a map
-  with :rom, the .nes file's bytes, and maybe :name), or just the bytes.
-  The game's variables become a lens (see `look`), and its names work as
-  addresses (see `syms`). Returns the ROM's size in bytes."
-  [built]
-  (workbench/play! built))
-
-(defn save!
-  "Download a built game as a .nes file, to play in any emulator:
-  (save! (catch/build))"
-  [built]
-  (workbench/save-nes! built))
-
-(defn save-edn!
-  "Download the loaded cartridge as EDN text (see gamedev-toolkit.rom-edn).
-  With no argument: the program, as instructions and tile drawings, if the
-  game was built here, otherwise the bytes as hex. Or ask for one:
-  (save-edn! :source) or (save-edn! :container)."
-  ([] (or (save-edn! :source) (save-edn! :container)))
-  ([kind] (workbench/save-edn! (:rom @db) kind)))
+(defn load!
+  "Load a ROM from a URL the page can fetch, and its names file if it has
+  one: (load! \"roms/croom/croom.nes\"), or
+  (load! \"roms/cartridj/catch.nes\" \"roms/cartridj/catch.debug.edn\").
+  A bare name like \"catch\" means a sample game in roms/cartridj, names
+  and all. (Games are made elsewhere: see cartridj, at
+  https://github.com/dfornika/nes-gamedev-toolkit-clj.)"
+  ([url]
+   (if (re-find #"[./]" url)
+     (load! url nil)
+     (load! (str "roms/cartridj/" url ".nes") (str "roms/cartridj/" url ".debug.edn"))))
+  ([url names-url]
+   (console/load-url! url names-url)
+   url))
 
 ;; ---------------------------------------------------------------------------
 ;; Tiles
 
 (defn tile
   "Tile `n` (0-255) of pattern table `table` (0 or 1; default 0), as the
-  PPU sees it now, as 8 strings of . 1 2 3: the way gamedev-toolkit.chr
-  draws tiles."
+  PPU sees it now, as 8 strings of . 1 2 3 (as cartridj.chr
+  draws tiles in a game's source)."
   ([n] (tile 0 n))
   ([table n]
    (chr/tile-text (emu/ppu-memory (emulator)) (chr/tile-address table n))))

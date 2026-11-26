@@ -99,7 +99,7 @@
   (let [peek #(emu/cpu-peek emulator %)
         instrs (disasm/disassemble peek pc 16)
         done @console/recent-steps
-        ;; names for addresses: the game's own, if it was built here, and
+        ;; names for addresses: the game's own, if it came with a names file, and
         ;; the hardware registers'
         table (debug-info/table-for (get-in @db [:rom :sha1]))
         name-of (debug-info/namer table)

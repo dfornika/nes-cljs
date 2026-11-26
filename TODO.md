@@ -237,11 +237,20 @@ played. So combine them.
 
 ## Making games (Phases 4 and 5)
 
-The plan is in `docs/clojurescript_game_dev_notes.md`. The game-making code
-is its own library, `gamedev-toolkit` (in `src/main/gamedev_toolkit`, all
-`.cljc`): it depends on nothing in `nes.*` but the opcode table, so it can
-move to its own repository once its API settles. Games are in
-`src/main/games`.
+**Moved out (2026-11-25).** The game-making code and the games now live in
+their own repository, <https://github.com/dfornika/nes-gamedev-toolkit-clj>.
+`gamedev-toolkit` became two libraries there: `zeropage` (the assembler,
+generators, subroutines, analysis) and `cartridj` (ROMs, tiles, palettes,
+the runtime and engine pieces). nes-cljs depends on neither. It plays the
+games as prebuilt `.nes` files with a names file beside each one
+(`resources/public/roms/cartridj`, read by `nes.debug-info`). The toolkit
+side depends on nes-cljs: its REPL workbench uses nes-cljs's console, and
+its CPU tests use `nes.cpu.core`. The list below is kept as history; new
+toolkit work is tracked in that repo. Still to do: move the 6502 core
+(`nes.cpu.opcodes`, `nes.cpu.disasm`, `nes.cpu.core`) into zeropage, which
+already has identical copies of the first two, so both projects share it.
+
+The plan is in `docs/clojurescript_game_dev_notes.md`.
 
 - [x] **Assembler** – `gamedev-toolkit.asm`: 6502 assembly as Clojure data
   (`[:lda [:imm 1]]`, `[:sta :player-x]`, `[:lda :table :x]`), labels, expressions,

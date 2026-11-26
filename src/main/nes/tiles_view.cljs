@@ -176,7 +176,7 @@
         :live (str "Changed in the PPU's memory only. This game keeps its tiles in RAM, or switches banks of them, "
                    "so the change lasts until the game writes or switches them again.")
         "Pick a color, then press and drag on the tile. The game's picture changes as you paint.")]
-     ;; the tile as gamedev-toolkit draws tiles in a game's source
+     ;; the tile as text, one character per pixel (as cartridj draws tiles in a game's source)
      [:div {:style {:margin-top "8px"}}
       [:div {:style (merge muted {:display "flex" :justify-content "space-between" :align-items "center"})}
        [:span "As text, for a game's source:"]

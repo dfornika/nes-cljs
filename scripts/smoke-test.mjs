@@ -15,7 +15,7 @@ import path from 'node:path';
 import {chromium} from 'playwright';
 
 const siteDir = path.resolve(process.env.SITE_DIR || 'resources/public');
-const types = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+const types = {'.edn': 'text/plain', '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
                '.nes': 'application/octet-stream', '.ico': 'image/x-icon', '.json': 'application/json'};
 
 // A tiny static file server, so the test needs nothing else running.
@@ -113,7 +113,6 @@ try {
   });
 
   // Each sample ROM should draw something: more than one color on screen.
-  // ("Hello" isn't a file: the page assembles it from ClojureScript data.)
   for (const [rom, file] of [['Hello', 'hello'], ['Thwaite', 'thwaite'], ['240p Test Suite', '240pee'],
                              ['Concentration Room', 'croom']]) {
     await step(`${rom} draws`, async () => {
@@ -265,9 +264,6 @@ try {
     }, 20000);
     await until(grounded);
     check(true, 'Star Hopper: Start begins play; A jumps, and it lands again');
-    await page.click('.overlay-chooser label:has-text("Physics")');
-    const blocks = await until(async () => { const n = await page.locator('.overlay-layer rect').count(); return n > 50 && n; });
-    check(true, `Star Hopper: the Physics overlay shows the solid blocks (${blocks} boxes)`);
   });
 
   await step('the ladder', async () => {
@@ -292,20 +288,18 @@ try {
   });
 
   await step('overlays', async () => {
-    // Shapes drawn over the picture from the game's own variables.
+    // Shapes drawn over the picture from memory: a box for each sprite.
+    // (A game's own overlays, like Catch's touch boxes, are code, so they
+    // only come with a game run from the toolkit's REPL, not a .nes file.)
     await page.click('button:text-is("Sample ROMs ▾")');
     await page.click('button:text-is("Catch the Stars")');
     await page.waitForSelector('.rom-name:has-text("catch")');
     await page.keyboard.down('Enter');
     await page.waitForTimeout(150);
     await page.keyboard.up('Enter');
-    await page.click('.overlay-chooser label:has-text("Touching")');
-    await page.waitForSelector('.overlay-layer text:text-is("player")');
-    const boxes = await page.locator('.overlay-layer rect').count();
-    check(boxes >= 4, `overlays: the game's touch boxes are drawn (${boxes} boxes)`);
     await page.click('.overlay-chooser label:has-text("Sprites")');
-    const more = await until(async () => { const n = await page.locator('.overlay-layer rect').count(); return n >= boxes + 12 && n; });
-    check(true, `overlays: and a box for each sprite (${more} boxes)`);
+    const boxes = await until(async () => { const n = await page.locator('.overlay-layer rect').count(); return n >= 4 && n; });
+    check(true, `overlays: a box for each sprite (${boxes} boxes)`);
   });
 
   await step('painting a tile', async () => {
