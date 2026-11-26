@@ -51,7 +51,7 @@
             [nes.breakpoints :as bp]
             [nes.chr :as chr]
             [nes.code-log :as code-log]
-            [nes.cpu.disasm :as disasm]
+            [zeropage.disasm :as disasm]
             [nes.debug-info :as debug-info]
             [nes.emulator :as emu]
             [nes.lens :as lens]

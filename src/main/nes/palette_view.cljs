@@ -4,7 +4,7 @@
   (:require [reagent.core :as r]
             [nes.chr :as chr]
             [nes.console :as console]
-            [nes.cpu.disasm :refer [hex]]
+            [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]))
 
 (def ^:private muted {:color "#57606a"})

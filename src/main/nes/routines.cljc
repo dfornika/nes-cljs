@@ -27,7 +27,7 @@
   file, after the header), like the code/data log."
   (:require [nes.bytes :as bytes]
             [nes.code-log :as cl]
-            [nes.cpu.disasm :as disasm]))
+            [zeropage.disasm :as disasm]))
 
 ;; ---------------------------------------------------------------------------
 ;; Where things are mapped

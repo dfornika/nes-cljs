@@ -1,9 +1,9 @@
 (ns nes.cpu.core-test
   (:require [cljs.test :refer [deftest is testing]]
             [nes.cpu.core :as cpu]
-            [nes.cpu.opcodes :as ops]
+            [zeropage.opcodes :as ops]
             [nes.cpu.reference :as ref]
-            [nes.cpu.disasm :as disasm]))
+            [zeropage.disasm :as disasm]))
 
 (defn- machine
   "A CPU at $C000 over flat memory holding `program` there, with the NMI

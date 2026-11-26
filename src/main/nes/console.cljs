@@ -10,7 +10,7 @@
             [nes.audio :as audio]
             [nes.breakpoints :as bp]
             [nes.compare :as compare]
-            [nes.cpu.disasm :as disasm]
+            [zeropage.disasm :as disasm]
             [nes.debug-info :as debug-info]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
@@ -316,7 +316,7 @@
   (refresh-inspectors!))
 
 ;; The last few instructions run with Step instruction (decoded, see
-;; nes.cpu.disasm), oldest first, so the CPU tab can show where you've just
+;; zeropage.disasm), oldest first, so the CPU tab can show where you've just
 ;; been. Anything else that runs the game (Run, Step frame...) empties it:
 ;; too much has happened since to call them 'the last few'.
 (defonce recent-steps (r/atom []))

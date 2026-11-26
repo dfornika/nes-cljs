@@ -3,8 +3,8 @@
   addressing modes, in plain English. Mnemonics in the CPU tab link here."
   (:require [clojure.string :as str]
             [reagent.core :as r]
-            [nes.cpu.disasm :refer [hex]]
-            [nes.cpu.opcodes :as ops]
+            [zeropage.disasm :refer [hex]]
+            [zeropage.opcodes :as ops]
             [nes.cpu.reference :as ref]
             [nes.state :refer [db]]))
 

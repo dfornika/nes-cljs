@@ -5,7 +5,7 @@
             [reagent.core :as r]
             [nes.breakpoints-view :refer [stop-on-write-button]]
             [nes.console :as console]
-            [nes.cpu.disasm :refer [hex]]
+            [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.memory-map :refer [memory-maps region-at]]))
 

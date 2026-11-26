@@ -246,9 +246,14 @@ games as prebuilt `.nes` files with a names file beside each one
 (`resources/public/roms/cartridj`, read by `nes.debug-info`). The toolkit
 side depends on nes-cljs: its REPL workbench uses nes-cljs's console, and
 its CPU tests use `nes.cpu.core`. The list below is kept as history; new
-toolkit work is tracked in that repo. Still to do: move the 6502 core
-(`nes.cpu.opcodes`, `nes.cpu.disasm`, `nes.cpu.core`) into zeropage, which
-already has identical copies of the first two, so both projects share it.
+toolkit work is tracked in that repo. The opcode table and disassembler
+are zeropage's now (`zeropage.opcodes`, `zeropage.disasm`). The CPU stays
+here: `nes.cpu.core` is an emulator's CPU (dummy reads, DMC quirks), and
+zeropage has its own simple one for running code under test. The two
+share an interface (`zeropage.cpu/Cpu`; ours is adapted in
+`nes.cpu.zeropage`), and `nes.cpu.zeropage-test` runs random programs on
+both to check they agree. See `libs/zeropage/docs/cpu-interface.md` in the
+toolkit repo.
 
 The plan is in `docs/clojurescript_game_dev_notes.md`.
 

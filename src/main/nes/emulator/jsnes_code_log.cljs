@@ -20,7 +20,7 @@
 
   Kept as plain JS typed arrays and numbers: this runs on every ROM read."
   (:require [nes.code-log :as cl]
-            [nes.cpu.opcodes :as ops]))
+            [zeropage.opcodes :as ops]))
 
 (def ^:private sizes
   "Instruction size by opcode. Unofficial opcodes count as 1 byte."

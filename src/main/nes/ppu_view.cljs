@@ -2,7 +2,7 @@
   "The PPU tab: the PPU's settings and status registers decoded bit by
   bit, and where it is in drawing the picture."
   (:require [nes.console :as console]
-            [nes.cpu.disasm :refer [hex]]
+            [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.ppu.registers :as ppu-registers]
             [nes.registers :as registers]

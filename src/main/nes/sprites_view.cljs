@@ -6,7 +6,7 @@
             [nes.canvas :refer [pixel-canvas]]
             [nes.chr :as chr]
             [nes.console :as console]
-            [nes.cpu.disasm :refer [hex]]
+            [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.screen :as screen]
             [nes.sprites :as sprites]))
