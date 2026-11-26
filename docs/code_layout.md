@@ -3,9 +3,9 @@
 The namespaces under `src/main/nes` are in five groups. Each group may
 require the groups above it, never the ones below. So the hardware never
 depends on the page, and nothing above the line marked "browser" needs
-one. Most of that part is `.cljc` and runs on the JVM too. The exceptions,
-written for speed in the browser for now, are `nes.cpu.core`,
-`nes.machine` and the jsnes adapters.
+one. Most of that part is `.cljc` and runs on the JVM too, including our
+6502 (`nes.cpu.core`). The exceptions, written for speed in the browser
+for now, are `nes.machine` and the jsnes adapters.
 
 | Group | Namespaces | What's there |
 |---|---|---|

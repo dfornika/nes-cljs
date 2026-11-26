@@ -1,5 +1,6 @@
 (ns nes.cpu.core
-  "A 6502 CPU, written in ClojureScript.
+  "A 6502 CPU, in Clojure: it runs in the browser (ClojureScript) and on
+  the JVM.
 
   The NES's CPU (a Ricoh 2A03) is a 6502 without decimal mode. This
   namespace runs its 151 official instructions and 93 unofficial ones
@@ -29,10 +30,11 @@
   (:require [nes.cpu.registers :as regs :refer [reg set-reg!]]
             [zeropage.opcodes :as ops]))
 
-;; (The functions below take the bus as `^not-native bus`: that tells
-;; ClojureScript the bus is something that implements Bus, so it calls the
+;; (The functions below take the bus as `^not-native bus` in ClojureScript:
+;; that tells it the bus is something that implements Bus, so it calls the
 ;; method directly instead of checking first. The bus is called millions
-;; of times a second, and the check cost about 5%.)
+;; of times a second, and the check cost about 5%. The JVM has no such
+;; hint, and refuses it, hence `#?(:cljs ^not-native bus :clj bus)`.)
 (defprotocol Bus
   "How the CPU reaches memory and the rest of the machine. Every method
   that reads returns a byte (0-255)."
@@ -62,19 +64,20 @@
 (defn create
   "A CPU in its state at power on (before RESET)."
   []
-  ;;                   a x y sp   pc p
-  (js/Int32Array. #js [0 0 0 0xFD 0 0x24]))
+  ;;                         a x y sp   pc p
+  #?(:clj (int-array         [0 0 0 0xFD 0 0x24])
+     :cljs (js/Int32Array. #js [0 0 0 0xFD 0 0x24])))
 
 (defn registers
   "All of `s`'s registers, as a map: {:a :x :y :sp :pc :p}."
-  [s]
-  (zipmap regs/names (array-seq s)))
+  [#?(:clj ^ints s :cljs s)]
+  (zipmap regs/names (map #(aget s %) (range (count regs/names)))))
 
 (defn set-registers!
   "Set some of `s`'s registers from a map, like the one `registers` gives."
-  [s m]
+  [#?(:clj ^ints s :cljs s) m]
   (doseq [[k v] m]
-    (aset s (or (regs/index k) (throw (ex-info (str "Not a register: " k) {:register k}))) v))
+    (aset s (or (regs/index k) (throw (ex-info (str "Not a register: " k) {:register k}))) (int v)))
   s)
 
 ;; ---------------------------------------------------------------------------
@@ -134,22 +137,22 @@
                         (sort (distinct (map :mnemonic (vals ops/all-opcodes)))))))
 
 (defn- table [f]
-  (let [a (js/Int32Array. 256)]
-    (doseq [[op info] ops/all-opcodes] (aset a op (f op info)))
+  (let [a #?(:clj (int-array 256) :cljs (js/Int32Array. 256))]
+    (doseq [[op info] ops/all-opcodes] (aset a op (int (or (f op info) 0))))
     a))
 
-(def ^:private op-ins (table (fn [_ {:keys [mnemonic]}] (mnemonics mnemonic))))
-(def ^:private op-mode (table (fn [_ {:keys [mode]}] (mode-codes mode))))
-(def ^:private op-size (table (fn [_ {:keys [size]}] size)))
-(def ^:private op-cycles (table (fn [op _] (base-cycles op))))
+(def ^:private ^"[I" op-ins (table (fn [_ {:keys [mnemonic]}] (mnemonics mnemonic))))
+(def ^:private ^"[I" op-mode (table (fn [_ {:keys [mode]}] (mode-codes mode))))
+(def ^:private ^"[I" op-size (table (fn [_ {:keys [size]}] size)))
+(def ^:private ^"[I" op-cycles (table (fn [op _] (base-cycles op))))
 
-(def ^:private op-name
+(def ^:private ^"[Ljava.lang.Object;" op-name
   "Each opcode's mnemonic (a keyword), or nil."
-  (let [a (make-array 256)]
+  (let [a (object-array 256)]
     (doseq [[op {:keys [mnemonic]}] ops/all-opcodes] (aset a op mnemonic))
     a))
 
-(def ^:private op-penalty
+(def ^:private ^"[I" op-penalty
   "1 for instructions that take an extra cycle when indexing crosses a
   page: the reads. (Stores and read-modify-writes always take it, and it's
   in their base cycles.)"
@@ -184,11 +187,11 @@
 
 (defn- flag? [s bit] (pos? (bit-and (reg s :p) bit)))
 
-(defn- push! [s ^not-native bus v]
+(defn- push! [s #?(:cljs ^not-native bus :clj bus) v]
   (push bus (reg s :sp) v)
   (set-reg! s :sp (bit-and (dec (reg s :sp)) 0xFF)))
 
-(defn- pull! [s ^not-native bus]
+(defn- pull! [s #?(:cljs ^not-native bus :clj bus)]
   (let [v (pull bus (reg s :sp))]
     (set-reg! s :sp (bit-and (inc (reg s :sp)) 0xFF))
     v))
@@ -216,10 +219,10 @@
 
 (defn- vector-at
   "The 2-byte address stored at `addr` (an interrupt vector)."
-  [^not-native bus addr]
+  [#?(:cljs ^not-native bus :clj bus) addr]
   (bit-or (read-vector bus addr) (bit-shift-left (read-vector bus (inc addr)) 8)))
 
-(defn- interrupt! [s ^not-native bus vector]
+(defn- interrupt! [s #?(:cljs ^not-native bus :clj bus) vector]
   (push! s bus (bit-and (bit-shift-right (reg s :pc) 8) 0xFF))
   (push! s bus (bit-and (reg s :pc) 0xFF))
   ;; P as pushed by an interrupt: B clear (that's how RTI's caller can
@@ -232,7 +235,7 @@
 (defn nmi!
   "Take a non-maskable interrupt (the PPU's 'frame finished'): save PC and
   P on the stack and jump to the address at $FFFA. Returns 7 (cycles)."
-  [s ^not-native bus]
+  [s #?(:cljs ^not-native bus :clj bus)]
   ;; two cycles of the CPU getting ready, with nothing on the bus
   (tick bus)
   (tick bus)
@@ -241,7 +244,7 @@
 (defn irq!
   "Take an IRQ, unless interrupts are disabled (I set): like NMI, through
   $FFFE. Returns the cycles taken (0 or 7)."
-  [s ^not-native bus]
+  [s #?(:cljs ^not-native bus :clj bus)]
   (if (flag? s I)
     0
     (do (flag! s B false)
@@ -250,14 +253,14 @@
 (defn jump-to-reset-vector!
   "What RESET does to the CPU, as jsnes models it: go to the address at
   $FFFC. Returns 7 (cycles)."
-  [s ^not-native bus]
+  [s #?(:cljs ^not-native bus :clj bus)]
   (set-reg! s :pc (vector-at bus 0xFFFC))
   7)
 
 (defn press-reset!
   "Press RESET: jump to the address at $FFFC, with interrupts disabled
   (and the stack pointer moved down 3, as a real 6502 does)."
-  [s ^not-native bus]
+  [s #?(:cljs ^not-native bus :clj bus)]
   (set-reg! s :sp (bit-and (- (reg s :sp) 3) 0xFF))
   (flag! s I true)
   (jump-to-reset-vector! s bus))
@@ -268,7 +271,7 @@
 (defn- branch!
   "A branch that's taken: the dummy reads a real 6502 makes, then jump.
   Returns the extra cycles (1, or 2 if it crosses a page)."
-  [s ^not-native bus next-pc target]
+  [s #?(:cljs ^not-native bus :clj bus) next-pc target]
   (read bus next-pc)
   (if (= (bit-and next-pc 0xFF00) (bit-and target 0xFF00))
     (do (set-reg! s :pc target) 1)
@@ -279,7 +282,7 @@
 (defn step!
   "Run one instruction. Returns the number of CPU cycles it took, or nil
   (doing nothing) if the opcode at PC isn't an official one."
-  [s ^not-native bus]
+  [s #?(:cljs ^not-native bus :clj bus)]
   (let [pc (reg s :pc)
         op (fetch bus pc)
         ins (aget op-ins op)]
@@ -476,18 +479,19 @@
 ;; A bus for running the CPU by itself
 
 (defn flat-bus
-  "A bus over `mem`, a Uint8Array of 64 KB: every address is plain memory
-  (writes to $8000 and up are ignored, as ROM). For tests and the REPL."
-  [^js mem]
+  "A bus over `mem`, 64 KB of memory (a Uint8Array in ClojureScript, an
+  int-array on the JVM): every address is plain memory (writes to $8000
+  and up are ignored, as ROM). For tests and the REPL."
+  [#?(:clj ^ints mem :cljs ^js mem)]
   (let [rd (fn [a] (aget mem (bit-and a 0xFFFF)))]
     (reify Bus
       (fetch [_ a] (rd a))
       (read-operand [_ a] (rd a))
       (read [_ a] (rd a))
       (read16 [_ a] (bit-or (rd a) (bit-shift-left (rd (inc a)) 8)))
-      (write [_ a v] (when (< a 0x8000) (aset mem a v)))
+      (write [_ a v] (when (< a 0x8000) (aset mem a (int v))))
       (read-vector [_ a] (rd a))
       (tick [_] nil)
       (dmc-during-instruction? [_] false)
-      (push [_ sp v] (aset mem (bit-or 0x100 sp) v))
+      (push [_ sp v] (aset mem (bit-or 0x100 sp) (int v)))
       (pull [_ sp] (aget mem (bit-or 0x100 (bit-and (inc sp) 0xFF)))))))
