@@ -11,7 +11,10 @@
   'mapper' chip that switches which part of a large ROM appears where;
   each kind of mapper has a number in the iNES header. This namespace has
   mapper 0 (NROM, the simplest: no switching), which is what every game
-  made with cartridj is so far."
+  made with cartridj is so far, and mapper 2 (UxROM: one switchable bank
+  of program ROM).
+
+  See https://www.nesdev.org/wiki/Mapper"
   (:refer-clojure :exclude [load])
   (:require [nes.bytes :as bytes]
             [nes.ppu.memory :as memory]
@@ -41,21 +44,62 @@
   (video-read [_ addr] (memory/video-read video addr))
   (video-write! [_ addr value] (memory/video-write! video addr value)))
 
+;; Mapper 2. Program ROM is up to 256 KB (sometimes more), in 16 KB banks.
+;; $C000-$FFFF always shows the last bank: that's where the reset code and
+;; the interrupt vectors are, so they're there whatever is switched in.
+;; $8000-$BFFF shows the bank the game picks, by writing its number
+;; anywhere from $8000 up. ROM can't be written, so the mapper chip
+;; listens for those writes instead. Tiles are 8 KB of RAM, which the game
+;; fills itself.
+;;
+;; (On some UxROM boards the ROM answers the write too, and the chip sees
+;; the value ANDed with the ROM's byte there: a 'bus conflict'. Games
+;; avoid trouble by writing to a byte that already holds the number. jsnes
+;; leaves bus conflicts out, so this does too.)
+(deftype Uxrom [prg-rom prg-ram chr-mem video ^:mutable ^:unsynchronized-mutable bank]
+  Cartridge
+  (cpu-read [_ addr]
+    (let [banks (quot (bytes/size prg-rom) 0x4000)]
+      (cond
+        (>= addr 0xC000) (bytes/at prg-rom (+ (* (dec banks) 0x4000) (- addr 0xC000)))
+        (>= addr 0x8000) (bytes/at prg-rom (+ (* (mod bank banks) 0x4000) (- addr 0x8000)))
+        (>= addr 0x6000) (bytes/at prg-ram (- addr 0x6000))
+        :else nil)))
+  (cpu-write! [_ addr value]
+    (cond
+      (>= addr 0x8000) (set! bank value)
+      (>= addr 0x6000) (bytes/put! prg-ram (- addr 0x6000) value)))
+  (prg [_] prg-rom)
+  (chr [_] chr-mem)
+  memory/VideoMemory
+  (video-read [_ addr] (memory/video-read video addr))
+  (video-write! [_ addr value] (memory/video-write! video addr value)))
+
+(def mappers
+  "The mappers this console has, by iNES number: the functions that make
+  each one's cartridge from its parts."
+  {0 (fn [{:keys [prg-rom prg-ram chr-mem video]}] (->Nrom prg-rom prg-ram chr-mem video))
+   2 (fn [{:keys [prg-rom prg-ram chr-mem video]}] (->Uxrom prg-rom prg-ram chr-mem video 0))})
+
 (defn load
   "A cartridge from the bytes of an iNES file. Throws if its mapper isn't
-  one we have."
+  one we have (see `mappers`)."
   [file]
   (let [{:keys [mapper prg-size chr-size chr-ram? mirroring trainer?] :as header} (rom/parse-header file)
         _ (when-not header (throw (ex-info "Not an iNES (.nes) file" {})))
-        _ (when-not (= 0 mapper)
-            (throw (ex-info (str "Mapper " mapper " (" (get rom/mapper-names mapper "unknown")
-                                 ") isn't in NES.cljs's console yet: only mapper 0. jsnes can run it.")
-                            {:mapper mapper})))
+        make (or (mappers mapper)
+                 (throw (ex-info (str "Mapper " mapper " (" (get rom/mapper-names mapper "unknown")
+                                      ") isn't in NES.cljs's console yet: only mappers "
+                                      (apply str (interpose " and " (sort (keys mappers))))
+                                      ". jsnes can run it.")
+                                 {:mapper mapper})))
         start (+ 16 (if trainer? 512 0))
         prg-rom (bytes/make prg-size)
         chr-mem (bytes/make (if chr-ram? 0x2000 chr-size))]
     (bytes/copy-into! prg-rom (bytes/slice file start (+ start prg-size)) 0)
     (when-not chr-ram?
       (bytes/copy-into! chr-mem (bytes/slice file (+ start prg-size) (+ start prg-size chr-size)) 0))
-    (->Nrom prg-rom (bytes/make 0x2000) chr-mem
-            (memory/video-memory {:chr chr-mem :chr-ram? chr-ram? :mirroring mirroring}))))
+    (make {:prg-rom prg-rom
+           :prg-ram (bytes/make 0x2000)
+           :chr-mem chr-mem
+           :video (memory/video-memory {:chr chr-mem :chr-ram? chr-ram? :mirroring mirroring})})))

@@ -191,6 +191,16 @@ try {
     const n = await until(async () => { const k = await same(); return k > 30 && k; }, 20000);
     check(true, `checked against jsnes: ${n} frames the same`);
     await page.click('button:text-is("Stop checking")');
+    // A cartridge with a mapper chip: the 240p Test Suite is mapper 2
+    // (UxROM), switching banks of program ROM as it goes
+    await page.click('button:text-is("Sample ROMs ▾")');
+    await page.click('button:text-is("240p Test Suite")');
+    await page.waitForSelector('.rom-name:has-text("240pee")');
+    await page.click('button:text-is("PPU")');
+    const g0 = await frame();
+    await until(async () => { const f = await frame(); return f > g0 + 10 && f; });
+    const shown = await until(async () => { const n = await colorsOnScreen(); return n > 3 && n; });
+    check(true, `NES.cljs's own console runs the 240p Test Suite, mapper 2 (${shown} colors)`);
     await page.click('button:text-is("CPU")');
     await page.locator('input[name="machine"]').nth(0).click();
     await page.waitForSelector('text=/jsnes is a JavaScript emulator/');

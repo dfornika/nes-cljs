@@ -227,7 +227,15 @@ played. So combine them.
     turning drawing on and off take effect after different delays on a real PPU
   - [ ] **More test ROMs** – AccuracyCoin; the mapper 1 and 3 ones (`ppu_read_buffer`, the
     all-in-one `ppu_vbl_nmi`) once we have those mappers; the CPU's interrupt and DMA tests
-  - [ ] **Step 7: more mappers** – next; see the plan
+  - [ ] **Step 7: more mappers** – see the plan
+    - [x] **Mapper 2 (UxROM)** – `nes.cartridge/Uxrom`; the 240p Test Suite runs on our
+      console with the same RAM as jsnes every frame (`nes.machine-test`)
+    - [ ] **Who's right about the 240p Test Suite's picture?** Two differences from jsnes,
+      left out of `nes.machine-test`: jsnes leaves line 0 black (ours draws it like line 1),
+      and draws the title screen's character (8x16 sprites from tile RAM) scrambled, where
+      ours looks clean. Probably jsnes in both cases, but check against hardware behaviour
+      (or Mesen) before calling it, and add them to `nes.compare` if so
+    - [ ] Mapper 3 (CNROM), mapper 1 (MMC1), mapper 4 (MMC3)
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,

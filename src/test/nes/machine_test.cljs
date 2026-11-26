@@ -15,10 +15,11 @@
             [nes.emulator.machine :as machine]))
 
 (defn- pair
-  "jsnes and our console, each with `game` loaded, keeping their last
+  "jsnes and our console, each with `game` (a sample game's name, or a
+  .nes file's bytes) loaded, keeping their last
   pictures, set up to keep in step (as nes.console/compare! does)."
   [game]
-  (let [rom (sample/rom game)
+  (let [rom (if (string? game) (sample/rom game) game)
         make (fn [create]
                (let [pic (atom nil)
                      e (create {:on-frame #(reset! pic (js/Uint32Array.from %))})]
@@ -49,6 +50,22 @@
                      (if (or (seq ram) (seq px))
                        {:frame k :ram (vec (take 5 ram))
                         :pixels (mapv (fn [i] [(mod i 256) (quot i 256)]) (take 5 px))}
+                       (recur (inc k))))))]
+    (doseq [{e :emu} [jsnes ours] b buttons] (emu/button-up! e 1 b))
+    result))
+
+(defn- play-ram!
+  "As `play!`, but comparing only RAM: the first frame where it differs,
+  or nil."
+  [{:keys [jsnes ours]} n & buttons]
+  (doseq [{e :emu} [jsnes ours] b buttons] (emu/button-down! e 1 b))
+  (let [result (loop [k 0]
+                 (when (< k n)
+                   (emu/frame! (:emu jsnes))
+                   (emu/frame! (:emu ours))
+                   (let [ram (compare/ram-diffs #(emu/cpu-peek (:emu ours) %) #(emu/cpu-peek (:emu jsnes) %))]
+                     (if (seq ram)
+                       {:frame k :ram (vec (take 5 ram))}
                        (recur (inc k))))))]
     (doseq [{e :emu} [jsnes ours] b buttons] (emu/button-up! e 1 b))
     result))
@@ -86,3 +103,30 @@
       (is (nil? (play! p 5 :start)))
       (is (nil? (play! p 300 :right)))
       (is (nil? (play! p 30 :a :right))))))
+
+(def ^:private fs (js/require "fs"))
+
+(deftest the-240p-test-suite
+  ;; Mapper 2 (UxROM): 64 KB of program in four 16 KB banks, switched as
+  ;; it moves between its menu and its tests. RAM is compared every frame,
+  ;; which is what the mapper decides: the wrong bank would run the wrong
+  ;; code. The pictures aren't compared here, because jsnes draws two
+  ;; things in this ROM differently from our PPU, and which of them is
+  ;; right is a separate question (TODO.md, under step 7): line 0, which
+  ;; jsnes leaves black, and the 8x16 sprites from tile RAM that make up
+  ;; the title screen's character, which jsnes draws scrambled.
+  (let [p (pair (js/Uint8Array. (.readFileSync fs "resources/public/roms/240p/240pee.nes")))
+        ^js m (.-m ^js (.-state (:emu (:ours p))))
+        banks (atom #{})
+        same-ram? (fn [n & buttons]
+                    (let [d (apply play-ram! p n buttons)]
+                      (swap! banks conj (.-bank ^js (:cart m)))
+                      (nil? d)))]
+    (is (same-ram? 90) "the title and the menu")
+    (doseq [[n test] [[1 "the first test"] [2 "the second"] [4 "the fourth"]]]
+      (dotimes [_ n] (is (same-ram? 4 :down)) (is (same-ram? 4)))
+      (is (same-ram? 4 :a))
+      (is (same-ram? 120) test)
+      (is (same-ram? 4 :b) "and back to the menu")
+      (is (same-ram? 30)))
+    (is (< 1 (count @banks)) (str "it switched banks: " (sort @banks)))))
