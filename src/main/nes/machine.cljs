@@ -40,6 +40,7 @@
             [nes.bytes :as bytes]
             [nes.cartridge :as cart]
             [nes.cpu.core :as cpu]
+            [nes.cpu.registers :refer [reg]]
             [nes.ppu.core :as ppu]
             [nes.ppu.registers :as r]
             [nes.ppu.render :as render]))
@@ -334,7 +335,7 @@
          (result s))
 
      :else
-     (let [pc (.-pc cpu)]
+     (let [pc (reg cpu :pc)]
        (if (and breakpoints? (exec-break? s pc))
          :break
          (do

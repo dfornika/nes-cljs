@@ -20,14 +20,14 @@
   effects, so this CPU makes them too, in the same order as jsnes, so the
   two can be swapped (see nes.emulator.jsnes-cljs-cpu).
 
-  The registers are kept in a JS object (a 'state'), because they change
-  millions of times a second:
-
-    #js {:a 0 :x 0 :y 0 :sp 0xFD :pc 0xC000 :p 0x24 :cycles 0}
-
-  `p` is the status register as one byte: N V - B D I Z C, bit 7 first."
+  The registers are kept in an array (a 'state', see nes.cpu.registers),
+  because they change millions of times a second: `(reg s :a)` reads A
+  and `(set-reg! s :a v)` sets it. From outside, `registers` gives them
+  all as a map. `p` is the status register as one byte: N V - B D I Z C,
+  bit 7 first."
   (:refer-clojure :exclude [read])
-  (:require [zeropage.opcodes :as ops]))
+  (:require [nes.cpu.registers :as regs :refer [reg set-reg!]]
+            [zeropage.opcodes :as ops]))
 
 ;; (The functions below take the bus as `^not-native bus`: that tells
 ;; ClojureScript the bus is something that implements Bus, so it calls the
@@ -62,7 +62,20 @@
 (defn create
   "A CPU in its state at power on (before RESET)."
   []
-  #js {:a 0 :x 0 :y 0 :sp 0xFD :pc 0 :p 0x24 :cycles 0})
+  ;;                   a x y sp   pc p
+  (js/Int32Array. #js [0 0 0 0xFD 0 0x24]))
+
+(defn registers
+  "All of `s`'s registers, as a map: {:a :x :y :sp :pc :p}."
+  [s]
+  (zipmap regs/names (array-seq s)))
+
+(defn set-registers!
+  "Set some of `s`'s registers from a map, like the one `registers` gives."
+  [s m]
+  (doseq [[k v] m]
+    (aset s (or (regs/index k) (throw (ex-info (str "Not a register: " k) {:register k}))) v))
+  s)
 
 ;; ---------------------------------------------------------------------------
 ;; Decoding tables: built once from zeropage.opcodes, as arrays indexed by
@@ -162,34 +175,34 @@
 
 (defn- set-nz!
   "Set N and Z from result `v` (a byte); return `v`."
-  [^js s v]
-  (set! (.-p s) (bit-or (bit-and (.-p s) 0x7D) (bit-and v N) (if (zero? v) Z 0)))
+  [s v]
+  (set-reg! s :p (bit-or (bit-and (reg s :p) 0x7D) (bit-and v N) (if (zero? v) Z 0)))
   v)
 
-(defn- flag! [^js s bit on?]
-  (set! (.-p s) (if on? (bit-or (.-p s) bit) (bit-and (.-p s) (bit-not bit)))))
+(defn- flag! [s bit on?]
+  (set-reg! s :p (if on? (bit-or (reg s :p) bit) (bit-and (reg s :p) (bit-not bit)))))
 
-(defn- flag? [^js s bit] (pos? (bit-and (.-p s) bit)))
+(defn- flag? [s bit] (pos? (bit-and (reg s :p) bit)))
 
-(defn- push! [^js s ^not-native bus v]
-  (push bus (.-sp s) v)
-  (set! (.-sp s) (bit-and (dec (.-sp s)) 0xFF)))
+(defn- push! [s ^not-native bus v]
+  (push bus (reg s :sp) v)
+  (set-reg! s :sp (bit-and (dec (reg s :sp)) 0xFF)))
 
-(defn- pull! [^js s ^not-native bus]
-  (let [v (pull bus (.-sp s))]
-    (set! (.-sp s) (bit-and (inc (.-sp s)) 0xFF))
+(defn- pull! [s ^not-native bus]
+  (let [v (pull bus (reg s :sp))]
+    (set-reg! s :sp (bit-and (inc (reg s :sp)) 0xFF))
     v))
 
-(defn- adc! [^js s v]
-  (let [a (.-a s)
+(defn- adc! [s v]
+  (let [a (reg s :a)
         sum (+ a v (if (flag? s C) 1 0))
         r (bit-and sum 0xFF)]
     (flag! s C (> sum 0xFF))
     ;; overflow: both inputs had the same sign, and the result doesn't
     (flag! s V (not (zero? (bit-and (bit-xor a r) (bit-xor v r) 0x80))))
-    (set! (.-a s) (set-nz! s r))))
+    (set-reg! s :a (set-nz! s r))))
 
-(defn- compare! [^js s reg v]
+(defn- compare! [s reg v]
   (flag! s C (>= reg v))
   (set-nz! s (bit-and (- reg v) 0xFF)))
 
@@ -206,15 +219,14 @@
   [^not-native bus addr]
   (bit-or (read-vector bus addr) (bit-shift-left (read-vector bus (inc addr)) 8)))
 
-(defn- interrupt! [^js s ^not-native bus vector]
-  (push! s bus (bit-and (bit-shift-right (.-pc s) 8) 0xFF))
-  (push! s bus (bit-and (.-pc s) 0xFF))
+(defn- interrupt! [s ^not-native bus vector]
+  (push! s bus (bit-and (bit-shift-right (reg s :pc) 8) 0xFF))
+  (push! s bus (bit-and (reg s :pc) 0xFF))
   ;; P as pushed by an interrupt: B clear (that's how RTI's caller can
   ;; tell an interrupt from BRK), the unused bit set
-  (push! s bus (bit-and (bit-or (.-p s) U) (bit-not B)))
+  (push! s bus (bit-and (bit-or (reg s :p) U) (bit-not B)))
   (flag! s I true)
-  (set! (.-pc s) (vector-at bus vector))
-  (set! (.-cycles s) (+ (.-cycles s) 7))
+  (set-reg! s :pc (vector-at bus vector))
   7)
 
 (defn nmi!
@@ -237,16 +249,16 @@
 
 (defn jump-to-reset-vector!
   "What RESET does to the CPU, as jsnes models it: go to the address at
-  $FFFC."
-  [^js s ^not-native bus]
-  (set! (.-pc s) (vector-at bus 0xFFFC))
-  (set! (.-cycles s) (+ (.-cycles s) 7)))
+  $FFFC. Returns 7 (cycles)."
+  [s ^not-native bus]
+  (set-reg! s :pc (vector-at bus 0xFFFC))
+  7)
 
 (defn press-reset!
   "Press RESET: jump to the address at $FFFC, with interrupts disabled
   (and the stack pointer moved down 3, as a real 6502 does)."
-  [^js s ^not-native bus]
-  (set! (.-sp s) (bit-and (- (.-sp s) 3) 0xFF))
+  [s ^not-native bus]
+  (set-reg! s :sp (bit-and (- (reg s :sp) 3) 0xFF))
   (flag! s I true)
   (jump-to-reset-vector! s bus))
 
@@ -256,19 +268,19 @@
 (defn- branch!
   "A branch that's taken: the dummy reads a real 6502 makes, then jump.
   Returns the extra cycles (1, or 2 if it crosses a page)."
-  [^js s ^not-native bus next-pc target]
+  [s ^not-native bus next-pc target]
   (read bus next-pc)
   (if (= (bit-and next-pc 0xFF00) (bit-and target 0xFF00))
-    (do (set! (.-pc s) target) 1)
+    (do (set-reg! s :pc target) 1)
     (do (read bus (bit-or (bit-and next-pc 0xFF00) (bit-and target 0xFF)))
-        (set! (.-pc s) target)
+        (set-reg! s :pc target)
         2)))
 
 (defn step!
   "Run one instruction. Returns the number of CPU cycles it took, or nil
   (doing nothing) if the opcode at PC isn't an official one."
-  [^js s ^not-native bus]
-  (let [pc (.-pc s)
+  [s ^not-native bus]
+  (let [pc (reg s :pc)
         op (fetch bus pc)
         ins (aget op-ins op)]
     (when (pos? ins)
@@ -290,21 +302,21 @@
                    (0 1) (do (read-operand bus o) 0)           ; implied, accumulator: dummy read
                    2 o                                          ; immediate: the operand itself
                    3 (read-operand bus o)                       ; zero page
-                   4 (let [b (read-operand bus o)] (read-operand bus b) (bit-and (+ b (.-x s)) 0xFF))
-                   5 (let [b (read-operand bus o)] (read-operand bus b) (bit-and (+ b (.-y s)) 0xFF))
+                   4 (let [b (read-operand bus o)] (read-operand bus b) (bit-and (+ b (reg s :x)) 0xFF))
+                   5 (let [b (read-operand bus o)] (read-operand bus b) (bit-and (+ b (reg s :y)) 0xFF))
                    6 (read16 bus o)                            ; absolute
-                   7 (index (read16 bus o) (.-x s))
-                   8 (index (read16 bus o) (.-y s))
+                   7 (index (read16 bus o) (reg s :x))
+                   8 (index (read16 bus o) (reg s :y))
                    9 (let [ptr (read16 bus o)]                 ; JMP ($nnnn), with the 6502's page bug
                        (bit-or (read bus ptr)
                                (bit-shift-left (read bus (bit-or (bit-and ptr 0xFF00) (bit-and (inc ptr) 0xFF))) 8)))
                    10 (let [p (read-operand bus o)
                             _ (read-operand bus p)
-                            zp (bit-and (+ p (.-x s)) 0xFF)]
+                            zp (bit-and (+ p (reg s :x)) 0xFF)]
                         (bit-or (read-operand bus zp) (bit-shift-left (read-operand bus (bit-and (inc zp) 0xFF)) 8)))
                    11 (let [zp (read-operand bus o)
                             base (bit-or (read-operand bus zp) (bit-shift-left (read-operand bus (bit-and (inc zp) 0xFF)) 8))]
-                        (index base (.-y s)))
+                        (index base (reg s :y)))
                    12 (let [off (read-operand bus o)]           ; relative: the branch target
                         (bit-and (+ next-pc (if (< off 0x80) off (- off 256))) 0xFFFF)))
             indexed? (contains? #{7 8 11} mode)
@@ -312,7 +324,7 @@
             store-dummy! #(when (and indexed? (zero? @cross)) (read bus addr))
             rmw! (fn [f]
                    (if (= mode 1)
-                     (set! (.-a s) (f (.-a s)))
+                     (set-reg! s :a (f (reg s :a)))
                      (do (store-dummy!)
                          (let [old (read bus addr)]
                            (write bus addr old)       ; writes the old value back first
@@ -337,24 +349,24 @@
                     (write bus a val)))
             extra (volatile! 0)
             branch (fn [taken?] (when taken? (vreset! extra (branch! s bus next-pc addr))))]
-        (set! (.-pc s) next-pc)
+        (set-reg! s :pc next-pc)
         (case (aget op-name op)
-          :lda (set! (.-a s) (set-nz! s (read bus addr)))
-          :ldx (set! (.-x s) (set-nz! s (read bus addr)))
-          :ldy (set! (.-y s) (set-nz! s (read bus addr)))
-          :sta (do (store-dummy!) (write bus addr (.-a s)))
-          :stx (write bus addr (.-x s))
-          :sty (write bus addr (.-y s))
+          :lda (set-reg! s :a (set-nz! s (read bus addr)))
+          :ldx (set-reg! s :x (set-nz! s (read bus addr)))
+          :ldy (set-reg! s :y (set-nz! s (read bus addr)))
+          :sta (do (store-dummy!) (write bus addr (reg s :a)))
+          :stx (write bus addr (reg s :x))
+          :sty (write bus addr (reg s :y))
           :adc (adc! s (read bus addr))
           :sbc (adc! s (bit-xor (read bus addr) 0xFF))
-          :and (set! (.-a s) (set-nz! s (bit-and (.-a s) (read bus addr))))
-          :ora (set! (.-a s) (set-nz! s (bit-or (.-a s) (read bus addr))))
-          :eor (set! (.-a s) (set-nz! s (bit-xor (.-a s) (read bus addr))))
-          :cmp (compare! s (.-a s) (read bus addr))
-          :cpx (compare! s (.-x s) (read bus addr))
-          :cpy (compare! s (.-y s) (read bus addr))
+          :and (set-reg! s :a (set-nz! s (bit-and (reg s :a) (read bus addr))))
+          :ora (set-reg! s :a (set-nz! s (bit-or (reg s :a) (read bus addr))))
+          :eor (set-reg! s :a (set-nz! s (bit-xor (reg s :a) (read bus addr))))
+          :cmp (compare! s (reg s :a) (read bus addr))
+          :cpx (compare! s (reg s :x) (read bus addr))
+          :cpy (compare! s (reg s :y) (read bus addr))
           :bit (let [v (read bus addr)]
-                 (flag! s Z (zero? (bit-and (.-a s) v)))
+                 (flag! s Z (zero? (bit-and (reg s :a) v)))
                  (flag! s N (pos? (bit-and v N)))
                  (flag! s V (pos? (bit-and v V))))
           :asl (rmw! (fn [v] (flag! s C (pos? (bit-and v 0x80))) (set-nz! s (bit-and (bit-shift-left v 1) 0xFF))))
@@ -367,16 +379,16 @@
                                (set-nz! s (bit-or (bit-shift-right v 1) c)))))
           :inc (rmw! (fn [v] (set-nz! s (bit-and (inc v) 0xFF))))
           :dec (rmw! (fn [v] (set-nz! s (bit-and (dec v) 0xFF))))
-          :inx (set! (.-x s) (set-nz! s (bit-and (inc (.-x s)) 0xFF)))
-          :iny (set! (.-y s) (set-nz! s (bit-and (inc (.-y s)) 0xFF)))
-          :dex (set! (.-x s) (set-nz! s (bit-and (dec (.-x s)) 0xFF)))
-          :dey (set! (.-y s) (set-nz! s (bit-and (dec (.-y s)) 0xFF)))
-          :tax (set! (.-x s) (set-nz! s (.-a s)))
-          :tay (set! (.-y s) (set-nz! s (.-a s)))
-          :txa (set! (.-a s) (set-nz! s (.-x s)))
-          :tya (set! (.-a s) (set-nz! s (.-y s)))
-          :tsx (set! (.-x s) (set-nz! s (.-sp s)))
-          :txs (set! (.-sp s) (.-x s))
+          :inx (set-reg! s :x (set-nz! s (bit-and (inc (reg s :x)) 0xFF)))
+          :iny (set-reg! s :y (set-nz! s (bit-and (inc (reg s :y)) 0xFF)))
+          :dex (set-reg! s :x (set-nz! s (bit-and (dec (reg s :x)) 0xFF)))
+          :dey (set-reg! s :y (set-nz! s (bit-and (dec (reg s :y)) 0xFF)))
+          :tax (set-reg! s :x (set-nz! s (reg s :a)))
+          :tay (set-reg! s :y (set-nz! s (reg s :a)))
+          :txa (set-reg! s :a (set-nz! s (reg s :x)))
+          :tya (set-reg! s :a (set-nz! s (reg s :y)))
+          :tsx (set-reg! s :x (set-nz! s (reg s :sp)))
+          :txs (set-reg! s :sp (reg s :x))
           :bcc (branch (not (flag? s C)))
           :bcs (branch (flag? s C))
           :bne (branch (not (flag? s Z)))
@@ -385,28 +397,28 @@
           :bmi (branch (flag? s N))
           :bvc (branch (not (flag? s V)))
           :bvs (branch (flag? s V))
-          :jmp (set! (.-pc s) addr)
+          :jmp (set-reg! s :pc addr)
           :jsr (let [ret (bit-and (dec next-pc) 0xFFFF)]   ; pushes the address of its last byte
                  (push! s bus (bit-shift-right ret 8))
                  (push! s bus (bit-and ret 0xFF))
                  (read-operand bus (bit-and (+ pc 2) 0xFFFF))
-                 (set! (.-pc s) addr))
+                 (set-reg! s :pc addr))
           :rts (let [lo (pull! s bus) hi (pull! s bus)]
-                 (set! (.-pc s) (bit-and (inc (bit-or lo (bit-shift-left hi 8))) 0xFFFF)))
+                 (set-reg! s :pc (bit-and (inc (bit-or lo (bit-shift-left hi 8))) 0xFFFF)))
           :rti (let [p (pull! s bus) lo (pull! s bus) hi (pull! s bus)]
                  ;; B and the unused bit aren't really in P: keep what's there
-                 (set! (.-p s) (bit-or (bit-and p 0xCF) (bit-and (.-p s) 0x30)))
-                 (set! (.-pc s) (bit-or lo (bit-shift-left hi 8))))
-          :pha (push! s bus (.-a s))
-          :php (push! s bus (bit-or (.-p s) B U))
-          :pla (set! (.-a s) (set-nz! s (pull! s bus)))
-          :plp (set! (.-p s) (bit-or (bit-and (pull! s bus) 0xCF) (bit-and (.-p s) 0x30)))
+                 (set-reg! s :p (bit-or (bit-and p 0xCF) (bit-and (reg s :p) 0x30)))
+                 (set-reg! s :pc (bit-or lo (bit-shift-left hi 8))))
+          :pha (push! s bus (reg s :a))
+          :php (push! s bus (bit-or (reg s :p) B U))
+          :pla (set-reg! s :a (set-nz! s (pull! s bus)))
+          :plp (set-reg! s :p (bit-or (bit-and (pull! s bus) 0xCF) (bit-and (reg s :p) 0x30)))
           :brk (let [ret (bit-and (inc next-pc) 0xFFFF)]   ; BRK skips a byte
                  (push! s bus (bit-shift-right ret 8))
                  (push! s bus (bit-and ret 0xFF))
-                 (push! s bus (bit-or (.-p s) B U))
+                 (push! s bus (bit-or (reg s :p) B U))
                  (flag! s I true)
-                 (set! (.-pc s) (read16 bus 0xFFFE)))
+                 (set-reg! s :pc (read16 bus 0xFFFE)))
           :clc (flag! s C false)
           :sec (flag! s C true)
           :cli (flag! s I false)
@@ -418,49 +430,47 @@
           ;; immediate ones don't)
           :nop (when (#{3 4 6 7} mode) (read bus addr))
           ;; ---- unofficial ----
-          :lax (let [v (set-nz! s (read bus addr))] (set! (.-a s) v) (set! (.-x s) v))
-          :sax (write bus addr (bit-and (.-a s) (.-x s)))
-          :dcp (let [v (rmw-mem! #(bit-and (dec %) 0xFF))] (compare! s (.-a s) v))
+          :lax (let [v (set-nz! s (read bus addr))] (set-reg! s :a v) (set-reg! s :x v))
+          :sax (write bus addr (bit-and (reg s :a) (reg s :x)))
+          :dcp (let [v (rmw-mem! #(bit-and (dec %) 0xFF))] (compare! s (reg s :a) v))
           :isb (adc! s (bit-xor (rmw-mem! #(bit-and (inc %) 0xFF)) 0xFF))
           :slo (let [v (rmw-mem! (fn [v] (flag! s C (pos? (bit-and v 0x80))) (bit-and (bit-shift-left v 1) 0xFF)))]
-                 (set! (.-a s) (set-nz! s (bit-or (.-a s) v))))
+                 (set-reg! s :a (set-nz! s (bit-or (reg s :a) v))))
           :rla (let [v (rmw-mem! (fn [v] (let [c (if (flag? s C) 1 0)]
                                            (flag! s C (pos? (bit-and v 0x80)))
                                            (bit-and (bit-or (bit-shift-left v 1) c) 0xFF))))]
-                 (set! (.-a s) (set-nz! s (bit-and (.-a s) v))))
+                 (set-reg! s :a (set-nz! s (bit-and (reg s :a) v))))
           :sre (let [v (rmw-mem! (fn [v] (flag! s C (pos? (bit-and v 1))) (bit-shift-right v 1)))]
-                 (set! (.-a s) (set-nz! s (bit-xor (.-a s) v))))
+                 (set-reg! s :a (set-nz! s (bit-xor (reg s :a) v))))
           :rra (let [v (rmw-mem! (fn [v] (let [c (if (flag? s C) 0x80 0)]
                                            (flag! s C (pos? (bit-and v 1)))
                                            (bit-or (bit-shift-right v 1) c))))]
                  (adc! s v))
-          :anc (let [v (set-nz! s (bit-and (.-a s) (read bus addr)))]
-                 (set! (.-a s) v)
+          :anc (let [v (set-nz! s (bit-and (reg s :a) (read bus addr)))]
+                 (set-reg! s :a v)
                  (flag! s C (pos? (bit-and v 0x80))))
-          :alr (let [v (bit-and (.-a s) (read bus addr))]
+          :alr (let [v (bit-and (reg s :a) (read bus addr))]
                  (flag! s C (pos? (bit-and v 1)))
-                 (set! (.-a s) (set-nz! s (bit-shift-right v 1))))
-          :arr (let [v (bit-and (.-a s) (read bus addr))
+                 (set-reg! s :a (set-nz! s (bit-shift-right v 1))))
+          :arr (let [v (bit-and (reg s :a) (read bus addr))
                      r (bit-or (bit-shift-right v 1) (if (flag? s C) 0x80 0))]
-                 (set! (.-a s) (set-nz! s r))
+                 (set-reg! s :a (set-nz! s r))
                  (flag! s C (pos? (bit-and v 0x80)))
                  (flag! s V (pos? (bit-and (bit-xor (bit-shift-right v 7) (bit-shift-right v 6)) 1))))
-          :axs (let [t (- (bit-and (.-x s) (.-a s)) (read bus addr))]
+          :axs (let [t (- (bit-and (reg s :x) (reg s :a)) (read bus addr))]
                  (flag! s C (>= t 0))
-                 (set! (.-x s) (set-nz! s (bit-and t 0xFF))))
-          :las (let [v (bit-and (read bus addr) (.-sp s))]
-                 (set! (.-a s) (set-nz! s v)) (set! (.-x s) v) (set! (.-sp s) v))
-          :xaa (set! (.-a s) (set-nz! s (bit-and (bit-or (.-a s) 0xFF) (.-x s) (read bus addr))))
-          :lxa (let [v (set-nz! s (bit-and (bit-or (.-a s) 0xFF) (read bus addr)))]
-                 (set! (.-a s) v) (set! (.-x s) v))
-          :sha (sh! (bit-and (.-a s) (.-x s)))
-          :shx (sh! (.-x s))
-          :shy (sh! (.-y s))
-          :tas (do (set! (.-sp s) (bit-and (.-a s) (.-x s)))
-                   (sh! (.-sp s))))
-        (let [cycles (+ (aget op-cycles op) (* @cross (aget op-penalty op)) @extra)]
-          (set! (.-cycles s) (+ (.-cycles s) cycles))
-          cycles)))))
+                 (set-reg! s :x (set-nz! s (bit-and t 0xFF))))
+          :las (let [v (bit-and (read bus addr) (reg s :sp))]
+                 (set-reg! s :a (set-nz! s v)) (set-reg! s :x v) (set-reg! s :sp v))
+          :xaa (set-reg! s :a (set-nz! s (bit-and (bit-or (reg s :a) 0xFF) (reg s :x) (read bus addr))))
+          :lxa (let [v (set-nz! s (bit-and (bit-or (reg s :a) 0xFF) (read bus addr)))]
+                 (set-reg! s :a v) (set-reg! s :x v))
+          :sha (sh! (bit-and (reg s :a) (reg s :x)))
+          :shx (sh! (reg s :x))
+          :shy (sh! (reg s :y))
+          :tas (do (set-reg! s :sp (bit-and (reg s :a) (reg s :x)))
+                   (sh! (reg s :sp))))
+        (+ (aget op-cycles op) (* @cross (aget op-penalty op)) @extra)))))
 
 ;; ---------------------------------------------------------------------------
 ;; A bus for running the CPU by itself

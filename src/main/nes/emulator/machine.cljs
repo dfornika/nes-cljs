@@ -7,6 +7,7 @@
   monitor, the code/data log, and mappers other than 0."
   (:require [nes.bytes :as bytes]
             [nes.cartridge :as cart]
+            [nes.cpu.core :as cpu]
             [nes.emulator :as emu]
             [nes.machine :as machine]
             [nes.ppu.core :as ppu]
@@ -58,9 +59,9 @@
   (master-palette [_] machine/master-palette)
   (cpu-peek [_ addr] (machine/peek-cpu (.-m state) addr))
   (cpu-state [_]
-    (let [^js c (:cpu (.-m state))]
-      {:a (.-a c) :x (.-x c) :y (.-y c) :sp (.-sp c) :pc (.-pc c) :p (.-p c)
-       :cycles (.-cycles ^js (:s (.-m state)))}))
+    ;; the cycles the whole console has run (DMA included), not just the CPU's
+    (assoc (cpu/registers (:cpu (.-m state)))
+           :cycles (.-cycles ^js (:s (.-m state)))))
   (ppu-state [_]
     (let [m (.-m state)
           ^js s (:s m)
