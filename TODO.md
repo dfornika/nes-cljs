@@ -235,7 +235,10 @@ played. So combine them.
       and draws the title screen's character (8x16 sprites from tile RAM) scrambled, where
       ours looks clean. Probably jsnes in both cases, but check against hardware behaviour
       (or Mesen) before calling it, and add them to `nes.inspect.compare` if so
-    - [ ] Mapper 3 (CNROM), mapper 1 (MMC1), mapper 4 (MMC3)
+    - [x] **Mapper 3 (CNROM)** – `nes.cartridge/Cnrom`: switchable tiles. No CNROM game
+      among the samples, so `nes.machine-test` assembles a small one (with zeropage.asm)
+      and compares it with jsnes through all four tile banks
+    - [ ] Mapper 1 (MMC1), mapper 4 (MMC3)
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,

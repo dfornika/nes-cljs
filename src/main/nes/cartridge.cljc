@@ -11,8 +11,8 @@
   'mapper' chip that switches which part of a large ROM appears where;
   each kind of mapper has a number in the iNES header. This namespace has
   mapper 0 (NROM, the simplest: no switching), which is what every game
-  made with cartridj is so far, and mapper 2 (UxROM: one switchable bank
-  of program ROM).
+  made with cartridj is so far, mapper 2 (UxROM: one switchable bank of
+  program ROM) and mapper 3 (CNROM: switchable tiles).
 
   See https://www.nesdev.org/wiki/Mapper"
   (:refer-clojure :exclude [load])
@@ -75,11 +75,44 @@
   (video-read [_ addr] (memory/video-read video addr))
   (video-write! [_ addr value] (memory/video-write! video addr value)))
 
+;; Mapper 3. The opposite of UxROM: program ROM is fixed (16 or 32 KB, as
+;; on NROM), and the tiles switch. Tile ROM is up to 32 KB (sometimes
+;; more), in 8 KB banks, and the PPU sees the one the game picks, by
+;; writing its number anywhere from $8000 up. A game can switch in a whole
+;; new set of tiles at once, to animate the background, say, or for a new
+;; screen. The nametables are as on NROM, so they're left to `video`.
+;;
+;; (Bus conflicts, as for UxROM: real CNROM boards have them, and games
+;; write to a byte that already holds the number. jsnes leaves them out,
+;; so this does too.)
+(deftype Cnrom [prg-rom prg-ram chr-rom video ^:mutable ^:unsynchronized-mutable bank]
+  Cartridge
+  (cpu-read [_ addr]
+    (cond
+      (>= addr 0x8000) (bytes/at prg-rom (bit-and (- addr 0x8000) (dec (bytes/size prg-rom))))
+      (>= addr 0x6000) (bytes/at prg-ram (- addr 0x6000))
+      :else nil))
+  (cpu-write! [_ addr value]
+    (cond
+      (>= addr 0x8000) (set! bank value)
+      (>= addr 0x6000) (bytes/put! prg-ram (- addr 0x6000) value)))
+  (prg [_] prg-rom)
+  (chr [_] chr-rom)
+  memory/VideoMemory
+  (video-read [_ addr]
+    (if (< addr 0x2000)
+      (let [banks (max 1 (quot (bytes/size chr-rom) 0x2000))]
+        (bytes/at chr-rom (+ (* (mod bank banks) 0x2000) addr)))
+      (memory/video-read video addr)))
+  ;; (`video` ignores writes to tile ROM)
+  (video-write! [_ addr value] (memory/video-write! video addr value)))
+
 (def mappers
   "The mappers this console has, by iNES number: the functions that make
   each one's cartridge from its parts."
   {0 (fn [{:keys [prg-rom prg-ram chr-mem video]}] (->Nrom prg-rom prg-ram chr-mem video))
-   2 (fn [{:keys [prg-rom prg-ram chr-mem video]}] (->Uxrom prg-rom prg-ram chr-mem video 0))})
+   2 (fn [{:keys [prg-rom prg-ram chr-mem video]}] (->Uxrom prg-rom prg-ram chr-mem video 0))
+   3 (fn [{:keys [prg-rom prg-ram chr-mem video]}] (->Cnrom prg-rom prg-ram chr-mem video 0))})
 
 (defn load
   "A cartridge from the bytes of an iNES file. Throws if its mapper isn't
@@ -90,7 +123,8 @@
         make (or (mappers mapper)
                  (throw (ex-info (str "Mapper " mapper " (" (get rom/mapper-names mapper "unknown")
                                       ") isn't in NES.cljs's console yet: only mappers "
-                                      (apply str (interpose " and " (sort (keys mappers))))
+                                      (let [[last-one & others] (reverse (sort (keys mappers)))]
+                                        (str (apply str (interpose ", " (reverse others))) " and " last-one))
                                       ". jsnes can run it.")
                                  {:mapper mapper})))
         start (+ 16 (if trainer? 512 0))

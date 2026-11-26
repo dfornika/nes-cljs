@@ -7,12 +7,12 @@
 (defn- ines
   "An iNES file: `prg-banks` of 16 KB (each filled with its bank number,
   then the address's low byte at the end), `chr-banks` of 8 KB (filled
-  with $C0), with these flags 6 (whose top 4 bits are the mapper number's
+  with $C0, $C1, ...: $C0 + the bank number), with these flags 6 (whose top 4 bits are the mapper number's
   low 4)."
   [prg-banks chr-banks flags6]
   (bytes/from (concat [0x4E 0x45 0x53 0x1A prg-banks chr-banks flags6 0 0 0 0 0 0 0 0 0]
                       (for [b (range prg-banks), i (range 0x4000)] (if (< i 0x3FF0) b (bit-and i 0xFF)))
-                      (repeat (* chr-banks 0x2000) 0xC0))))
+                      (for [b (range chr-banks), _ (range 0x2000)] (+ 0xC0 b)))))
 
 (deftest nrom
   (testing "16 KB of program, seen at $8000 and again at $C000"
@@ -60,6 +60,29 @@
     (testing "the tiles are RAM"
       (memory/video-write! c 0x10 7)
       (is (= 7 (memory/video-read c 0x10))))))
+
+(deftest cnrom
+  (let [c (cart/load (ines 2 4 0x30))]            ; mapper 3: 32 KB of program, four 8 KB tile banks
+    (testing "at power on, the PPU sees tile bank 0"
+      (is (= [0xC0 0xC0] [(memory/video-read c 0x0000) (memory/video-read c 0x1FFF)])))
+    (testing "writing a bank number anywhere from $8000 switches all 8 KB of tiles"
+      (cart/cpu-write! c 0x8000 2)
+      (is (= [0xC2 0xC2] [(memory/video-read c 0x0000) (memory/video-read c 0x1FFF)]))
+      (cart/cpu-write! c 0xFFFF 3)
+      (is (= 0xC3 (memory/video-read c 0x1000))))
+    (testing "the program doesn't move"
+      (doseq [b (range 4)]
+        (cart/cpu-write! c 0x8000 b)
+        (is (= [0 1 0xFC] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000) (cart/cpu-read c 0xFFFC)]))))
+    (testing "a bank number past the end wraps round"
+      (cart/cpu-write! c 0x8000 5)
+      (is (= 0xC1 (memory/video-read c 0x0010))))
+    (testing "the tiles are ROM"
+      (memory/video-write! c 0x0010 7)
+      (is (= 0xC1 (memory/video-read c 0x0010))))
+    (testing "and the nametables are RAM, as on NROM"
+      (memory/video-write! c 0x2005 9)
+      (is (= 9 (memory/video-read c 0x2005))))))
 
 (deftest other-mappers
   (is (thrown-with-msg? #?(:clj Exception :cljs js/Error) #"Mapper 1 \(MMC1\)"
