@@ -12,11 +12,7 @@
   jsnes does, except where jsnes differs from a real PPU. The comparison
   skips those pixels, and says why."
   (:require [cljs.test :refer [deftest is testing]]
-            [games.alienscape :as alienscape]
-            [games.hello :as hello]
-            [games.hopper :as hopper]
-            [games.star-run :as star-run]
-            [games.tower :as tower]
+            [nes.sample-roms :as sample]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.bytes :as bytes]
@@ -28,7 +24,7 @@
 (defn- console [game]
   (let [frame (atom nil)
         e (jsnes/create {:on-frame #(reset! frame (js/Uint32Array.from %))})]
-    (emu/load-rom! e (js/Uint8Array.from (clj->js (:rom (game)))))
+    (emu/load-rom! e (sample/rom game))
     ;; jsnes blacks out the edges a TV would hide (8 pixels all round);
     ;; a PPU draws them
     (set! (.. ^js (:nes e) -ppu -clipToTvSize) false)
@@ -90,12 +86,12 @@
                       [(mod i 256) (quot i 256) (.toString a 16) (.toString b 16)]))))))
 
 (deftest hello-world
-  (let [c (console hello/build)]
+  (let [c (console "hello")]
     (frames! c 30)
     (is (= [] (compare-frame! c)))))
 
 (deftest star-hopper
-  (let [c (console hopper/build)]
+  (let [c (console "hopper")]
     (frames! c 30)
     (is (= [] (compare-frame! c)) "the title")
     (frames! c 5 :start)
@@ -106,14 +102,14 @@
     (is (= [] (compare-frame! c)) "in the air")))
 
 (deftest alienscape
-  (let [c (console alienscape/build)]
+  (let [c (console "alienscape")]
     (frames! c 30)
     (frames! c 5 :start)
     (frames! c 60 :right)
     (is (= [] (compare-frame! c)))))
 
 (deftest star-tower
-  (let [c (console tower/build)]
+  (let [c (console "tower")]
     (frames! c 30)
     (frames! c 5 :start)
     (frames! c 30 :right)
@@ -121,7 +117,7 @@
 
 (deftest star-run
   (testing "scrolled partway: the camera's fine X, two nametables, sprites for the score"
-    (let [c (console star-run/build)]
+    (let [c (console "star-run")]
       (frames! c 30)
       (frames! c 5 :start)
       (frames! c 90 :right)

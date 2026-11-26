@@ -3,14 +3,26 @@
   code. With them the disassembly can say `STA player.x` instead of
   `STA $04`, and you can set a breakpoint on `main`.
 
-  A game built here with gamedev-toolkit brings its names with it: the
-  assembler knows every label, and the allocator every variable (see
-  `symbol-table` and `lens-fields`, which read what a game's `build`
-  returns). Other games have only the names every NES game shares: the
-  hardware registers, like PPUCTRL at $2000.
+  A ROM file is only bytes: the names were in the source, and the
+  assembler threw them away. So a game can bring them along in a second
+  file, a 'names file' beside its .nes file (as ca65's .dbg files do for
+  the games it builds). The games built with cartridj
+  (https://github.com/dfornika/nes-gamedev-toolkit-clj) write one; the
+  sample games in resources/public/roms/cartridj have theirs. It's EDN:
+
+    {:name        \"hopper.nes\"
+     :labels      {:main 0x8012 ...}              ; places in the code
+     :memory      {:variables [{:name :kind :type :addr :size :doc} ...]
+                   :symbols   {:player/x 0x04 ...}}  ; what's where in RAM
+     :subroutines [{:name :doc} ...]}               ; what the code is for
+
+  Other games have only the names every NES game shares: the hardware
+  registers, like PPUCTRL at $2000.
 
   Tables are kept per ROM, by its SHA-1 (as lenses are)."
-  (:require [nes.registers :as registers]))
+  (:require #?(:clj [clojure.edn :as edn] :cljs [cljs.reader :as edn])
+            [nes.lens :as lens]
+            [nes.registers :as registers]))
 
 (defn display-name
   "A symbol as it's shown: :main -> \"main\", :player/x -> \"player.x\"."
@@ -20,7 +32,7 @@
     (str k)))
 
 ;; ---------------------------------------------------------------------------
-;; From a build: a lens, and a table of names
+;; From a names file: a lens, and a table of names
 
 (defn- lens-spec
   "A one-value type at `addr` as a lens field spec: :u8 -> [:u8 addr],
@@ -29,8 +41,7 @@
   (if (vector? t) (into [(first t) addr] (rest t)) [t addr]))
 
 (defn lens-fields
-  "The variables in `memory` (from gamedev-toolkit.memory/allocate) as a
-  lens: [[name spec] ...], in the order they were declared (see nes.lens).
+  "The variables in `memory` (a names file's :memory) as a lens: [[name spec] ...], in the order they were declared (see nes.lens).
   A structure of arrays becomes one array per field, named like
   :enemies.x. So does a struct that wouldn't fit on one line of the Lens
   tab: one with more than four fields, or with a field of named bits (a
@@ -83,8 +94,8 @@
                      (range) fields)))))
 
 (defn symbol-table
-  "The names in a game built with gamedev-toolkit (what its `build`
-  returns: :labels from the assembler, :memory from the allocator):
+  "The names in a names file (its :labels, :memory and :subroutines), as
+  a table for looking them up:
 
     {:names     {address \"name\"}    every byte of every variable, and every label
      :labels    {address \"name\"}    just the labels in the code
@@ -108,6 +119,25 @@
   "Use `table` (see `symbol-table`) for the ROM with this SHA-1."
   [sha1 table]
   (swap! registry assoc sha1 table)
+  sha1)
+
+(defn read-names
+  "A names file's text, read."
+  [text]
+  (edn/read-string text))
+
+(defn install!
+  "Use the names in `names` (a names file, read) for the ROM with this
+  SHA-1: in the disassembly, for breakpoints and at the REPL, and its
+  variables as a lens called \"Variables\" in the Lens tab. Returns
+  `sha1`."
+  [sha1 names]
+  (register! sha1 (symbol-table names))
+  (when-let [fields (seq (lens-fields (:memory names)))]
+    (lens/register! {:rom sha1
+                     :name "Variables"
+                     :doc "The game's variables, as its names file gives them."
+                     :fields (vec fields)}))
   sha1)
 
 (defn table-for

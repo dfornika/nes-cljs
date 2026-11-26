@@ -11,7 +11,7 @@
   'mapper' chip that switches which part of a large ROM appears where;
   each kind of mapper has a number in the iNES header. This namespace has
   mapper 0 (NROM, the simplest: no switching), which is what every game
-  made with gamedev-toolkit is."
+  made with cartridj is so far."
   (:refer-clojure :exclude [load])
   (:require [nes.bytes :as bytes]
             [nes.ppu.memory :as memory]

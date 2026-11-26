@@ -11,6 +11,7 @@
             [nes.breakpoints :as bp]
             [nes.compare :as compare]
             [nes.cpu.disasm :as disasm]
+            [nes.debug-info :as debug-info]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.emulator.machine :as machine]
@@ -664,13 +665,28 @@
   (-> (.arrayBuffer file)
       (.then #(load-any! (.-name file) (js/Uint8Array. %)))))
 
-(defn load-url!
-  "Load a ROM from a URL (.nes, .zip or .gz)."
-  [url]
+(defn- fetch!
+  "A promise of what's at `url`: (.arrayBuffer response) or (.text response)."
+  [url read]
   (-> (js/fetch url)
       (.then (fn [^js resp]
                (if (.-ok resp)
-                 (.arrayBuffer resp)
-                 (throw (js/Error. (str "HTTP " (.-status resp)))))))
-      (.then #(load-any! (last (.split url "/")) (js/Uint8Array. %)))
-      (.catch #(swap! db assoc :error (str "Couldn't fetch " url ": " (ex-message %))))))
+                 (read resp)
+                 (throw (js/Error. (str "HTTP " (.-status resp) " for " url))))))))
+
+(defn load-url!
+  "Load a ROM from a URL (.nes, .zip or .gz). With `names-url`, also its
+  names file (see nes.debug-info), so the inspectors can use the game's
+  own names for its code and variables."
+  ([url] (load-url! url nil))
+  ([url names-url]
+   (-> (js/Promise.all
+        #js [(fetch! url #(.arrayBuffer ^js %))
+             (if names-url (fetch! names-url #(.text ^js %)) (js/Promise.resolve nil))])
+       (.then (fn [^js results]
+                (let [bytes (js/Uint8Array. (aget results 0))]
+                  ;; the names first, so they're there when the game's first shown
+                  (when-let [text (aget results 1)]
+                    (debug-info/install! (rom/rom-hash bytes) (debug-info/read-names text)))
+                  (load-any! (last (.split url "/")) bytes))))
+       (.catch #(swap! db assoc :error (str "Couldn't fetch " url ": " (ex-message %)))))))

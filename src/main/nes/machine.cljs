@@ -36,8 +36,7 @@
 
   A machine is a map of its parts, plus `:s`, a JS object of the numbers
   that change every cycle."
-  (:require [gamedev-toolkit.palette :as palette]
-            [nes.breakpoints :as bp]
+  (:require [nes.breakpoints :as bp]
             [nes.bytes :as bytes]
             [nes.cartridge :as cart]
             [nes.cpu.core :as cpu]
@@ -45,10 +44,24 @@
             [nes.ppu.registers :as r]
             [nes.ppu.render :as render]))
 
+(def rgb
+  "What each of the 64 color numbers looks like, as [red green blue], 0
+  to 255 each. The NES made its colors as a TV signal, not as red, green
+  and blue, so every emulator's table is someone's measurement and they
+  all differ a little; this is the one jsnes draws with."
+  [[82 82 82] [0 0 180] [0 0 160] [61 0 177] [105 0 116] [91 0 0] [95 0 0] [64 24 0]
+   [16 47 0] [8 74 8] [0 103 0] [0 66 18] [0 40 109] [0 0 0] [0 0 0] [0 0 0]
+   [231 213 196] [0 64 255] [34 14 220] [107 71 255] [159 0 215] [215 10 104] [188 25 0] [177 84 0]
+   [91 106 0] [3 140 0] [0 171 0] [0 136 44] [0 114 164] [0 0 0] [0 0 0] [0 0 0]
+   [248 248 248] [60 171 255] [129 121 255] [197 91 255] [242 72 255] [255 73 223] [255 109 71] [247 180 0]
+   [255 224 0] [117 227 0] [43 244 3] [46 184 120] [24 226 229] [120 120 120] [0 0 0] [0 0 0]
+   [255 255 255] [190 242 255] [184 184 248] [216 184 248] [255 182 255] [255 195 255] [255 209 199] [255 218 154]
+   [248 237 136] [221 255 131] [184 248 184] [172 248 245] [176 255 255] [248 216 248] [0 0 0] [0 0 0]])
+
 (def master-palette
   "The 64 colors, as 32-bit 0x00BBGGRR numbers (the same as jsnes's)."
   (js/Uint32Array.from
-   (clj->js (for [[red green blue] palette/rgb]
+   (clj->js (for [[red green blue] rgb]
               (bit-or (bit-shift-left blue 16) (bit-shift-left green 8) red)))))
 
 ;; ---------------------------------------------------------------------------

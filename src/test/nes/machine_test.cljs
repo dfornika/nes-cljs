@@ -8,11 +8,7 @@
   in step, and which pixels are left out because jsnes draws them
   differently from a real PPU."
   (:require [cljs.test :refer [deftest is testing]]
-            [games.alienscape :as alienscape]
-            [games.hello :as hello]
-            [games.hopper :as hopper]
-            [games.star-run :as star-run]
-            [games.tower :as tower]
+            [nes.sample-roms :as sample]
             [nes.compare :as compare]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
@@ -22,7 +18,7 @@
   "jsnes and our console, each with `game` loaded, keeping their last
   pictures, set up to keep in step (as nes.console/compare! does)."
   [game]
-  (let [rom (js/Uint8Array.from (clj->js (:rom (game))))
+  (let [rom (sample/rom game)
         make (fn [create]
                (let [pic (atom nil)
                      e (create {:on-frame #(reset! pic (js/Uint32Array.from %))})]
@@ -58,11 +54,11 @@
     result))
 
 (deftest hello-world
-  (let [p (pair hello/build)]
+  (let [p (pair "hello")]
     (is (nil? (play! p 60)))))
 
 (deftest star-hopper
-  (let [p (pair hopper/build)]
+  (let [p (pair "hopper")]
     (is (nil? (play! p 30)) "the title")
     (is (nil? (play! p 5 :start)))
     (is (nil? (play! p 60 :right)) "running")
@@ -70,14 +66,14 @@
     (is (nil? (play! p 120)) "and on")))
 
 (deftest alienscape
-  (let [p (pair alienscape/build)]
+  (let [p (pair "alienscape")]
     (is (nil? (play! p 30)))
     (is (nil? (play! p 5 :start)))
     (is (nil? (play! p 90 :right)))
     (is (nil? (play! p 30 :b)))))
 
 (deftest star-tower
-  (let [p (pair tower/build)]
+  (let [p (pair "tower")]
     (is (nil? (play! p 30)))
     (is (nil? (play! p 5 :start)))
     (is (nil? (play! p 60 :right)))
@@ -85,7 +81,7 @@
 
 (deftest star-run
   (testing "scrolling, with columns streamed in during vertical blank"
-    (let [p (pair star-run/build)]
+    (let [p (pair "star-run")]
       (is (nil? (play! p 30)))
       (is (nil? (play! p 5 :start)))
       (is (nil? (play! p 300 :right)))

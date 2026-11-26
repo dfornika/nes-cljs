@@ -10,10 +10,10 @@
   PPU draws, some registers behave differently, and that isn't modelled
   yet."
   (:require [cljs.test :refer [deftest is]]
+            [nes.sample-roms :as sample]
             [clojure.test.check.clojure-test :refer-macros [defspec]]
             [clojure.test.check.generators :as tc]
             [clojure.test.check.properties :as prop :include-macros true]
-            [games.hello :as hello]
             [nes.bytes :as bytes]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
@@ -22,7 +22,7 @@
             [nes.rom :as rom]))
 
 (def ^:private cartridge
-  (js/Uint8Array.from (clj->js (:rom (hello/build)))))
+  (sample/rom "hello"))
 
 (defn- ours
   "Our registers, with video memory like the cartridge's."

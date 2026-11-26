@@ -22,7 +22,7 @@
   for sprites.
 
   See https://www.nesdev.org/wiki/PPU_pattern_tables"
-  (:require [gamedev-toolkit.chr :as toolkit-chr]
+  (:require [clojure.string :as str]
             [nes.bytes :as bytes]))
 
 (def tile-bytes 16)
@@ -116,16 +116,34 @@
      [(+ addr y 8) (with-bit (bytes/at mem (+ addr y 8)) (bit-test color 1))]]))
 
 (defn tile-text
-  "The tile at `addr` in `mem` as 8 strings of `.` `1` `2` `3`: how
-  gamedev-toolkit.chr draws tiles in a game's source."
+  "The tile at `addr` in `mem` as 8 strings of `.` `1` `2` `3`, one
+  character per pixel (`.` for 0), so you can read its shape at the REPL."
   [mem addr]
-  (toolkit-chr/rows (mapv #(bytes/at mem (+ addr %)) (range tile-bytes))))
+  (mapv (fn [row] (apply str (map #(if (zero? %) "." %) row)))
+        (tile-pixels mem addr)))
+
+(defn- text-pixel [c rows]
+  (case c
+    (\. \0 \space) 0
+    \1 1
+    \2 2
+    \3 3
+    (throw (ex-info (str "Pixels are . 1 2 or 3, not " (pr-str c)) {:rows rows}))))
 
 (defn text-writes
   "The bytes to write to make the tile at `addr` look like `rows` (8
-  strings of `.` `1` `2` `3`): [[address value] ...]."
+  strings of `.` `1` `2` `3`, as `tile-text` gives them): [[address value]
+  ...]. Each row becomes two bytes, one per bit plane: the low bits of its
+  8 pixels, then (8 bytes on) the high bits."
   [addr rows]
-  (vec (map-indexed (fn [i byte] [(+ addr i) byte]) (toolkit-chr/tile rows))))
+  (when-not (and (= 8 (count rows)) (every? #(= 8 (count %)) rows))
+    (throw (ex-info (str "A tile is 8 rows of 8 pixels:\n" (str/join "\n" rows)) {:rows rows})))
+  (let [plane (fn [row b]
+                (reduce (fn [byte c] (bit-or (bit-shift-left byte 1)
+                                             (bit-and (bit-shift-right (text-pixel c rows) b) 1)))
+                        0 row))]
+    (vec (concat (map-indexed (fn [y row] [(+ addr y) (plane row 0)]) rows)
+                 (map-indexed (fn [y row] [(+ addr 8 y) (plane row 1)]) rows)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Drawing

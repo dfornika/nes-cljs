@@ -1,19 +1,23 @@
 (ns nes.debug-info-test
   (:require [clojure.test :refer [deftest is testing]]
-            [games.hello :as hello]
-            [gamedev-toolkit.memory :as memory]
             [nes.cpu.disasm :as disasm]
             [nes.debug-info :as di]
-            [nes.lens :as lens]))
+            [nes.lens :as lens]
+            [nes.sample-roms :as sample]))
 
+;; A names file's :memory, as cartridj.memory/allocate gives it for
+;;   [[:frame :u8] [:score :u16] [:state [:enum {0 :title 1 :playing}]]
+;;    [:player {:x :u8 :y :u16}] [:enemies [:soa 4 {:x :u8 :hp :u8}]]
+;;    [:oam [:array 256 :u8] {:at 0x0200 :hide true}]]
 (def ^:private mem
-  (memory/allocate
-   [[:frame :u8]
-    [:score :u16]
-    [:state [:enum {0 :title 1 :playing}]]
-    [:player {:x :u8 :y :u16}]
-    [:enemies [:soa 4 {:x :u8 :hp :u8}]]
-    [:oam [:array 256 :u8] {:at 0x0200 :hide true}]]))
+  {:variables [{:name :frame :kind :scalar :type :u8 :size 1 :addr 0}
+               {:name :score :kind :scalar :type :u16 :size 2 :addr 1}
+               {:name :state :kind :scalar :type [:enum {0 :title 1 :playing}] :size 1 :addr 3}
+               {:name :player :kind :struct :type [:struct [[:x :u8] [:y :u16]]] :size 3 :addr 4}
+               {:name :enemies :kind :soa :type [:soa 4 [[:x :u8] [:hp :u8]]] :size 8 :addr 0x300}
+               {:name :oam :kind :array :type [:array 256 :u8] :size 256 :hide true :addr 0x200}]
+   :symbols {:frame 0 :score 1 :state 3 :player 4 :player/x 4 :player/y 5
+             :enemies 0x300 :enemies/x 0x300 :enemies/hp 0x304 :oam 0x200}})
 
 (deftest display-names
   (is (= "main" (di/display-name :main)))
@@ -38,7 +42,9 @@
                v))))))
 
 (deftest fixed-point-variables
-  (let [m (memory/allocate [[:speed :s8.8] [:player {:x :u8.8 :hp :u8}]])
+  (let [m {:variables [{:name :speed :kind :scalar :type :s8.8 :size 2 :addr 0}
+                       {:name :player :kind :struct :type [:struct [[:x :u8.8] [:hp :u8]]] :size 3 :addr 2}]
+           :symbols {:speed 0 :player 2 :player/x 2 :player/hp 4}}
         fields (di/lens-fields m)
         ram (assoc (vec (repeat 0x800 0)) 0 0x80, 1 0xFF, 2 0x40, 3 100, 4 7)
         t (di/symbol-table {:labels {} :memory m})]
@@ -79,10 +85,11 @@
   (is (nil? (di/name-at nil 0x0010))))
 
 (deftest disassembly-with-names
-  (let [{:keys [prg] :as built} (hello/build)
-        t (di/symbol-table built)
+  ;; hello.nes: a 16-byte header, then 16 KB of program, seen at $C000
+  (let [rom (sample/rom-vec "hello")
+        t (di/symbol-table (sample/names "hello"))
         name-of (di/namer t)
-        peek #(get prg (- % 0xC000))
+        peek #(get rom (+ 16 (- % 0xC000)))
         lines (fn [label n] (mapv #(disasm/text % name-of) (disasm/disassemble peek (di/address t label) n)))]
     (is (= ["SEI" "CLD" "LDX #$40" "STX APU_FRAME"] (lines :reset 4)) "a hardware register, as written")
     (is (= ["JSR read-controller" "JSR move-player" "JSR draw-player" "LDA frame"] (lines :main 4))
