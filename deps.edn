@@ -3,9 +3,10 @@
         org.clojure/core.async {:mvn/version "1.9.865"}
         ;; the 6502's opcode table and disassembler (zeropage.opcodes,
         ;; zeropage.disasm), and the CPU interface nes.cpu.zeropage
-        ;; implements. From the toolkit repo: a sibling checkout until
-        ;; zeropage is pushed, then :git/url + :git/sha + :deps/root "libs/zeropage"
-        io.github.dfornika/zeropage {:local/root "../nes-gamedev-toolkit-clj/libs/zeropage"}
+        ;; implements: libs/zeropage in the toolkit repo
+        io.github.dfornika/zeropage {:git/url "https://github.com/dfornika/nes-gamedev-toolkit-clj"
+                                     :git/sha "3c05b709de5bd1b1cb8d5af82012abf3557a6a07"
+                                     :deps/root "libs/zeropage"}
         cljs-http/cljs-http {:mvn/version "0.1.48"}
         reagent/reagent {:mvn/version "2.0.1"
                          :exclusions [cljsjs/react cljsjs/react-dom]}
