@@ -6,7 +6,7 @@
   animation frame and tell the emulator about anything that changed.
   The first gamepad plays as player 1, the second as player 2."
   (:require [nes.console :as console]
-            [nes.gamepad :refer [pressed-buttons]]
+            [nes.gamepad :as gp :refer [pressed-buttons]]
             [nes.state :refer [db]]))
 
 (def key-map
@@ -68,6 +68,8 @@
     (->> (array-seq (.getGamepads js/navigator))
          (remove nil?)
          (filter #(.-connected ^js %))
+         ;; not headsets and other devices with buttons (see gp/usable?)
+         (filter (fn [^js p] (gp/usable? (.-mapping p) (array-seq (.-axes p)))))
          (sort-by #(.-index ^js %))
          (take 2))
     []))

@@ -25,3 +25,9 @@
 (deftest short-button-lists
   ;; some gamepads report fewer buttons than the standard 17
   (is (= #{:a} (gp/pressed-buttons [false true] []))))
+
+(deftest which-devices-are-gamepads
+  (is (gp/usable? "standard" []) "the standard layout")
+  (is (gp/usable? "" [0 0 0 0]) "a generic USB pad: no mapping, but sticks")
+  (is (not (gp/usable? "" [])) "a headset: buttons, but no layout and no sticks")
+  (is (not (gp/usable? "" [0])) "one axis isn't a stick"))
