@@ -141,18 +141,20 @@
     (doseq [[op info] ops/all-opcodes] (aset a op (int (or (f op info) 0))))
     a))
 
-(def ^:private ^"[I" op-ins (table (fn [_ {:keys [mnemonic]}] (mnemonics mnemonic))))
-(def ^:private ^"[I" op-mode (table (fn [_ {:keys [mode]}] (mode-codes mode))))
-(def ^:private ^"[I" op-size (table (fn [_ {:keys [size]}] size)))
-(def ^:private ^"[I" op-cycles (table (fn [op _] (base-cycles op))))
+;; (^int/1 is Clojure 1.12's name for the JVM's int[]: these are int arrays
+;; there, so reading them needs no reflection. ClojureScript ignores it.)
+(def ^:private ^int/1 op-ins (table (fn [_ {:keys [mnemonic]}] (mnemonics mnemonic))))
+(def ^:private ^int/1 op-mode (table (fn [_ {:keys [mode]}] (mode-codes mode))))
+(def ^:private ^int/1 op-size (table (fn [_ {:keys [size]}] size)))
+(def ^:private ^int/1 op-cycles (table (fn [op _] (base-cycles op))))
 
-(def ^:private ^"[Ljava.lang.Object;" op-name
+(def ^:private ^Object/1 op-name
   "Each opcode's mnemonic (a keyword), or nil."
   (let [a (object-array 256)]
     (doseq [[op {:keys [mnemonic]}] ops/all-opcodes] (aset a op mnemonic))
     a))
 
-(def ^:private ^"[I" op-penalty
+(def ^:private ^int/1 op-penalty
   "1 for instructions that take an extra cycle when indexing crosses a
   page: the reads. (Stores and read-modify-writes always take it, and it's
   in their base cycles.)"
