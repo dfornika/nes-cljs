@@ -5,6 +5,7 @@
   (:require [reagent.core :as r]
             [nes.breakpoints :as bp]
             [nes.app.console :as console]
+            [nes.app.breakpoints :as breaks]
             [nes.inspect.debug-info :as debug-info]
             [nes.app.state :refer [db]]))
 
@@ -15,7 +16,7 @@
   (some #(when (and (= :write (:kind %)) (= addr (:addr %))
                     (nil? (:end %)) (nil? (:value %)))
            %)
-        (console/breakpoints)))
+        (breaks/breakpoints)))
 
 (defn stop-on-write-button
   "A small button that adds (or removes) a breakpoint for writes to `addr`."
@@ -27,8 +28,8 @@
               :on-click (fn [e]
                           (.preventDefault e)
                           (if b
-                            (console/remove-breakpoint! (:id b))
-                            (console/add-breakpoint! {:kind :write :addr addr})))
+                            (breaks/remove-breakpoint! (:id b))
+                            (breaks/add-breakpoint! {:kind :write :addr addr})))
               :style {:font-size "11px" :padding "0 4px" :cursor "pointer"
                       :border "1px solid #d0d7de" :border-radius "3px"
                       :background (if b "#ffebe9" "white")
@@ -54,7 +55,7 @@
             add! (fn [ev]
                    (.preventDefault ev)
                    (when valid?
-                     (console/add-breakpoint!
+                     (breaks/add-breakpoint!
                       (cond-> {:kind (keyword kind) :addr a}
                         e (assoc :end e)
                         (and v (not= kind "exec")) (assoc :value v)))
@@ -72,7 +73,7 @@
          [:button {:type "submit" :disabled (not valid?)} "Add"]]))))
 
 (defn breakpoints-panel []
-  (let [bps (console/breakpoints)
+  (let [bps (breaks/breakpoints)
         current (get-in @db [:break :breakpoint :id])]
     [:div
      (if (empty? bps)
@@ -85,7 +86,7 @@
            [:tr {:style {:background (when (= id current) "#ffebe9")}}
             [:td [:input {:type "checkbox" :checked (boolean enabled?)
                           :title "On or off"
-                          :on-change #(console/update-breakpoint! id update :enabled? not)}]]
+                          :on-change #(breaks/update-breakpoint! id update :enabled? not)}]]
             [:td {:style (merge mono {:padding "1px 10px 1px 4px"
                                       :color (if enabled? "#24292f" "#8c959f")})}
              (bp/describe b)
@@ -95,7 +96,7 @@
                [:span {:style {:color "#8250df"}} " " n])]
             [:td {:style (merge muted {:padding "1px 10px"})}
              (when (pos? hits) (str hits (if (= 1 hits) " hit" " hits")))]
-            [:td [:button {:on-click #(console/remove-breakpoint! id) :title "Remove"} "×"]]])]])
+            [:td [:button {:on-click #(breaks/remove-breakpoint! id) :title "Remove"} "×"]]])]])
      [add-form]
      [:div {:style (merge muted {:font-size "12px" :margin-top "6px" :max-width "560px"})}
       "Execute breakpoints stop before the instruction runs. Read and write "
@@ -105,7 +106,7 @@
 (defn break-notice
   "Under the screen, while stopped at a breakpoint: why, and how to go on."
   []
-  (when-let [reason (console/break-reason)]
+  (when-let [reason (breaks/break-reason)]
     [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"
                    :background "#ffebe9" :border "1px solid #ff8182" :border-radius "6px"
                    :padding "4px 10px" :font-size "13px" :color "#24292f"}}

@@ -9,7 +9,7 @@
   belong to the PPU, PRG and work RAM to the CPU.)"
   (:require [clojure.string :as str]
             [reagent.core :as r]
-            [nes.app.console :as console]
+            [nes.app.bus-monitor :as bus]
             [zeropage.disasm :refer [hex]]
             [nes.memory-map :as memory-map]
             [nes.ui.memory :as memory-view]
@@ -419,7 +419,7 @@
                " " [:span {:style mono} reg] [:span {:style muted} " " n]]))]))]))
 
 (defn- bus-log []
-  (let [log @console/bus-log
+  (let [log @bus/bus-log
         {:keys [hidden hidden-regs only]} @bus-filter
         h @hover
         events (for [{:keys [addr write?] :as e} log]
@@ -475,7 +475,7 @@
 
 (defn- schematic-body []
   (let [{:keys [rom status]} @db
-        activity @console/bus-activity
+        activity @bus/bus-activity
         step? (and (= status :paused) (= :step (:kind activity)))
         activity (if (or step? (= status :running)) activity {:counts {}})
         header (:header rom)]
@@ -498,6 +498,6 @@
   []
   (r/create-class
    {:display-name "schematic-view"
-    :component-did-mount #(console/monitor-bus! true)
-    :component-will-unmount #(console/monitor-bus! false)
+    :component-did-mount #(bus/monitor-bus! true)
+    :component-will-unmount #(bus/monitor-bus! false)
     :reagent-render (fn [] [schematic-body])}))

@@ -4,6 +4,7 @@
   (:require [reagent.core :as r]
             [nes.ui.breakpoints :refer [stop-on-write-button]]
             [nes.app.console :as console]
+            [nes.app.current :as current]
             [zeropage.disasm :refer [hex]]
             [nes.inspect.lens :as lens]
             [nes.ui.memory :as memory-view]
@@ -121,7 +122,7 @@
 (defn- commit!
   "Write `value` into field `spec` (at `path`) of the running game."
   [spec path value]
-  (when-let [e (console/emulator-instance)]
+  (when-let [e (current/emulator-instance)]
     (when-let [ws (lens/writes (snapshot/capture e) spec path value)]
       (console/write! ws))))
 
@@ -306,10 +307,10 @@
           [field-value spec v]]]))]])
 
 (defn lens-view []
-  (let [tick @console/inspect-tick
+  (let [tick @current/inspect-tick
         rom (:rom @db)
         portal (:portal @dev-tools)]
-    (if-let [e (console/emulator-instance)]
+    (if-let [e (current/emulator-instance)]
       (let [lenses (lens/lenses-for rom)
             own? (some #(not= :any (:matched-by %)) lenses)
             {:keys [name doc fields matched-by] :as current}

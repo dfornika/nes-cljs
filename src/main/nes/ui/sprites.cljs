@@ -5,7 +5,7 @@
             [reagent.core :as r]
             [nes.ui.canvas :refer [pixel-canvas]]
             [nes.inspect.chr :as chr]
-            [nes.app.console :as console]
+            [nes.app.current :as current]
             [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.app.screen :as screen]
@@ -147,8 +147,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn sprites-view []
-  (let [tick @console/inspect-tick]
-    (if-let [emulator (console/emulator-instance)]
+  (let [tick @current/inspect-tick]
+    (if-let [emulator (current/emulator-instance)]
       (let [flags (emu/ppu-flags emulator)
             all (sprites/sprites (emu/oam emulator))
             visible (count (remove :hidden? all))]

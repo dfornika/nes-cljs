@@ -4,7 +4,7 @@
   (:require [clojure.string :as str]
             [reagent.core :as r]
             [nes.ui.breakpoints :refer [stop-on-write-button]]
-            [nes.app.console :as console]
+            [nes.app.current :as current]
             [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.memory-map :refer [memory-maps region-at]]))
@@ -231,10 +231,10 @@
             [:td [:button {:on-click #(toggle-watch! space addr) :title "Stop watching"} "×"]]])]])]))
 
 (defn memory-view []
-  (let [tick @console/inspect-tick
+  (let [tick @current/inspect-tick
         {:keys [space base]} @view
         base (get base space)]
-    (if-let [emulator (console/emulator-instance)]
+    (if-let [emulator (current/emulator-instance)]
       [:div
        [space-picker]
        [nav-bar base]

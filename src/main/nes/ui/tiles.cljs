@@ -7,6 +7,7 @@
             [nes.ui.canvas :refer [pixel-canvas]]
             [nes.inspect.chr :as chr]
             [nes.app.console :as console]
+            [nes.app.current :as current]
             [nes.emulator :as emu]))
 
 (def ^:private scale 2)
@@ -260,8 +261,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn tiles-view []
-  (let [tick @console/inspect-tick
-        emulator (console/emulator-instance)]
+  (let [tick @current/inspect-tick
+        emulator (current/emulator-instance)]
     (if-not emulator
       [:p {:style {:color "#57606a"}} "Load a ROM to see its tiles."]
       [:div

@@ -48,6 +48,9 @@
   returns nil instead of disturbing the hardware."
   (:require [clojure.string :as str]
             [nes.app.console :as console]
+            [nes.app.breakpoints :as breaks]
+            [nes.app.current :as current]
+            [nes.app.loading :as loading]
             [nes.breakpoints :as bp]
             [nes.inspect.chr :as chr]
             [nes.code-log :as code-log]
@@ -65,7 +68,7 @@
             [nes.inspect.text-table :as text-table]))
 
 (defn- emulator []
-  (or (console/emulator-instance)
+  (or (current/emulator-instance)
       (throw (ex-info "No ROM loaded yet. Open one in the page first." {}))))
 
 (defn hex
@@ -186,7 +189,7 @@
   ([kind addr opts]
    (assert (some #{kind} bp/kinds) (str "kind is one of " bp/kinds))
    (let [[lo hi] (map #(some-> % sym) (if (vector? addr) addr [addr nil]))]
-     (console/add-breakpoint! (cond-> (merge (select-keys opts [:value :when]) {:kind kind :addr lo})
+     (breaks/add-breakpoint! (cond-> (merge (select-keys opts [:value :when]) {:kind kind :addr lo})
                                 hi (assoc :end hi))))))
 
 (defn breaks
@@ -195,12 +198,12 @@
   (mapv (fn [{:keys [id enabled? hits] :as b}]
           (cond-> {:id id :breakpoint (bp/describe b) :hits hits}
             (not enabled?) (assoc :enabled? false)))
-        (console/breakpoints)))
+        (breaks/breakpoints)))
 
 (defn unbreak!
   "Remove breakpoint `id`, or with no argument, all of them."
-  ([] (console/clear-breakpoints!) [])
-  ([id] (console/remove-breakpoint! id) (breaks)))
+  ([] (breaks/clear-breakpoints!) [])
+  ([id] (breaks/remove-breakpoint! id) (breaks)))
 
 (defn why
   "Why the game last stopped at a breakpoint: the hit, described, or nil."
@@ -427,7 +430,7 @@
      (load! url nil)
      (load! (str "roms/cartridj/" url ".nes") (str "roms/cartridj/" url ".debug.edn"))))
   ([url names-url]
-   (console/load-url! url names-url)
+   (loading/load-url! url names-url)
    url))
 
 ;; ---------------------------------------------------------------------------

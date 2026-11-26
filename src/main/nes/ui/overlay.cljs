@@ -1,7 +1,7 @@
 (ns nes.ui.overlay
   "Overlays on the page: the shapes, drawn over the game's picture, and
   the checkboxes that turn each overlay on."
-  (:require [nes.app.console :as console]
+  (:require [nes.app.current :as current]
             [nes.inspect.overlay :as overlay]
             [nes.app.screen :as screen]
             [nes.inspect.snapshot :as snapshot]
@@ -57,10 +57,10 @@
   whatever size the screen is. Clicks go through it."
   []
   ;; redraw every frame while running, and whenever the inspectors refresh
-  @console/frame-tick
-  @console/inspect-tick
+  @current/frame-tick
+  @current/inspect-tick
   (let [{:keys [rom overlays]} @db
-        emulator (console/emulator-instance)
+        emulator (current/emulator-instance)
         on (filter #(contains? overlays (:name %)) (overlay/overlays-for rom))]
     (when (and emulator (seq on))
       (let [s (snapshot/live emulator)]

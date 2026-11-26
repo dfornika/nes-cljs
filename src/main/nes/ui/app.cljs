@@ -3,6 +3,7 @@
   (:require [reagent.core :as r]
             [nes.ui.components :as c]
             [nes.app.console :as console]
+            [nes.app.loading :as loading]
             [nes.rom :as rom]
             [nes.app.screen :as screen]
             [nes.ui.background :refer [background-view]]
@@ -102,7 +103,7 @@
                 :style {:display "none"}
                 :on-change (fn [^js e]
                              (when-let [f (aget (.. e -target -files) 0)]
-                               (console/load-file! f))
+                               (loading/load-file! f))
                              ;; so choosing the same file again still fires
                              (set! (.. e -target -value) ""))}]])))
 
@@ -160,7 +161,7 @@
                           (.preventDefault e)
                           (reset! dragging? false)
                           (when-let [f (aget (.. e -dataTransfer -files) 0)]
-                            (console/load-file! f)))}
+                            (loading/load-file! f)))}
          [screen/canvas {:fill? true}]
          [overlay-view/layer]
          (when (contains? #{nil :empty} status)
@@ -260,7 +261,7 @@
          [:div {:style {:margin-top "6px" :font-size "13px"}}
           "Other ROMs in " [:code archive] ": "
           [:select {:value archive-entry
-                    :on-change #(console/load-from-archive! (.. % -target -value))}
+                    :on-change #(loading/load-from-archive! (.. % -target -value))}
            (for [r archive-roms] ^{:key r} [:option {:value r} r])]])
        (when patched
          [:div {:style {:margin-top "6px" :font-size "13px" :background "#fbefff"
@@ -309,7 +310,7 @@
      [:div {:style {:margin-bottom "12px"}}
       [:button {:on-click (fn []
                             (hide-popover! "samples-menu")
-                            (console/load-url! url names))
+                            (loading/load-url! url names))
                 :style {:font-weight "bold"}}
        name]
       [:div {:style {:font-size "13px" :margin-top "3px"}} blurb]
@@ -328,7 +329,7 @@
        [:button {:title about
                  :on-click (fn []
                              (hide-popover! "samples-menu")
-                             (console/load-url! (str "roms/cartridj/ladder-" id ".nes")
+                             (loading/load-url! (str "roms/cartridj/ladder-" id ".nes")
                                                 (str "roms/cartridj/ladder-" id ".debug.edn")))}
         id])]]])
 
