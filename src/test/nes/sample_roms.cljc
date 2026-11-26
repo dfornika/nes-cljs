@@ -2,7 +2,7 @@
   "The sample games the site serves (resources/public/roms/cartridj),
   read from disk for the tests: they're our test cartridges, built with
   cartridj (see the README there)."
-  (:require [nes.debug-info :as debug-info]
+  (:require [nes.inspect.debug-info :as debug-info]
             #?(:clj [clojure.java.io :as io])))
 
 (def ^:private dir "resources/public/roms/cartridj/")
@@ -26,6 +26,6 @@
   (mapv #(bit-and % 0xFF) (read-bytes (str dir game-name ".nes"))))
 
 (defn names
-  "Sample game `game-name`'s names file, read (see nes.debug-info)."
+  "Sample game `game-name`'s names file, read (see nes.inspect.debug-info)."
   [game-name]
   (debug-info/read-names (#?(:clj slurp :cljs #(.readFileSync fs % "utf8")) (str dir game-name ".debug.edn"))))

@@ -69,7 +69,7 @@ should start portable. The options:
 
 **Recommendation:** arrays. Every function is then a plain `defn` over a
 map of arrays, so the same code runs on both platforms. Saving the state
-is copying arrays, which is what save states, rewind and `nes.snapshot`
+is copying arrays, which is what save states, rewind and `nes.inspect.snapshot`
 want anyway.
 
 ### 3. What the picture is made of
@@ -159,8 +159,8 @@ jsnes's pictures of our five games. The tabs don't use it yet.*
 
 A pure function: PPU memory, OAM and registers in, a frame of palette
 indexes out. No timing. Each line is drawn from the scroll position as it
-was at the start of the frame. Most of it exists already: `nes.chr`
-decodes tiles, `nes.nametable` tiles and attributes, and `nes.sprites`
+was at the start of the frame. Most of it exists already: `nes.inspect.chr`
+decodes tiles, `nes.inspect.nametable` tiles and attributes, and `nes.inspect.sprites`
 OAM. It applies the real rules:
 
 - 8 sprites per line, the lowest-numbered first.
@@ -285,7 +285,7 @@ now measure the real thing.
 ### Step 5: compare with jsnes in the app
 
 *Done, as you play rather than for a fixed 600 frames with no buttons
-pressed (our games would sit on their title screens): `nes.compare`, and
+pressed (our games would sit on their title screens): `nes.inspect.compare`, and
 "Check against jsnes as you play" in the CPU tab. Stepping by instruction
 or line, a breakpoint partway through a frame, Reset, and editing memory
 end the check, since the two can't stay in step through them.*

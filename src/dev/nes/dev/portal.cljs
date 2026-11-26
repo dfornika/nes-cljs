@@ -22,7 +22,7 @@
   Then `(tap> x)`, or `(tap-snap!)` from nes.repl, sends values there."
   (:require [portal.client.web :as remote]
             [portal.web :as web]
-            [nes.state :as state]))
+            [nes.app.state :as state]))
 
 ;; The tap function we've added, so we never add two.
 (defonce ^:private current-tap (atom nil))

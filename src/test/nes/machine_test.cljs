@@ -3,13 +3,13 @@
   side by side with jsnes: the same buttons pressed on the same frames,
   then the same RAM and the same picture after every frame, from power on.
 
-  This is the CPU tab's \"Check against jsnes\" (nes.console/compare!),
-  with the same rules (nes.compare): what's set up first so the two keep
+  This is the CPU tab's \"Check against jsnes\" (nes.app.console/compare!),
+  with the same rules (nes.inspect.compare): what's set up first so the two keep
   in step, and which pixels are left out because jsnes draws them
   differently from a real PPU."
   (:require [cljs.test :refer [deftest is testing]]
             [nes.sample-roms :as sample]
-            [nes.compare :as compare]
+            [nes.inspect.compare :as compare]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.emulator.machine :as machine]))
@@ -17,7 +17,7 @@
 (defn- pair
   "jsnes and our console, each with `game` (a sample game's name, or a
   .nes file's bytes) loaded, keeping their last
-  pictures, set up to keep in step (as nes.console/compare! does)."
+  pictures, set up to keep in step (as nes.app.console/compare! does)."
   [game]
   (let [rom (if (string? game) (sample/rom game) game)
         make (fn [create]
