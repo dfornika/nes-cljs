@@ -4,7 +4,7 @@
   (:require [reagent.core :as r]
             [nes.ui.canvas :refer [pixel-canvas]]
             [nes.inspect.chr :as chr]
-            [nes.app.console :as console]
+            [nes.app.current :as current]
             [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.inspect.nametable :as nt]
@@ -174,8 +174,8 @@
         " have them for many games. Load one to read the screen as text."])]))
 
 (defn background-view []
-  (let [tick @console/inspect-tick]
-    (if-let [e (console/emulator-instance)]
+  (let [tick @current/inspect-tick]
+    (if-let [e (current/emulator-instance)]
       (let [flags (emu/ppu-flags e)
             palettes (bg-palettes e)
             {:keys [scroll]} (emu/ppu-state e)

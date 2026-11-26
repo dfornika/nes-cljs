@@ -5,6 +5,9 @@
             [nes.ui.breakpoints :refer [breakpoints-panel]]
             [nes.ui.canvas :refer [pixel-canvas]]
             [nes.app.console :as console]
+            [nes.app.breakpoints :as breaks]
+            [nes.app.checking :as checking]
+            [nes.app.current :as current]
             [zeropage.disasm :as disasm :refer [hex]]
             [zeropage.opcodes :as ops]
             [nes.cpu.reference :as ref]
@@ -104,7 +107,7 @@
         table (debug-info/table-for (get-in @db [:rom :sha1]))
         name-of (debug-info/namer table)
         labels? (some #(debug-info/label-at table (:addr %)) (concat done instrs))
-        exec-bps (into {} (for [b (console/breakpoints)
+        exec-bps (into {} (for [b (breaks/breakpoints)
                                 :when (and (= :exec (:kind b)) (nil? (:end b)))]
                             [(:addr b) b]))
         ;; `state` is :done (already run), :next (about to run) or :later
@@ -116,7 +119,7 @@
                  [:td {:style {:padding "1px 2px 1px 6px" :width "12px" :cursor "pointer"
                                :color (if (and b (:enabled? b)) "#cf222e" "#d0d7de")}
                        :title (if b "Remove the breakpoint here" "Stop before running this instruction")
-                       :on-click #(console/toggle-exec-breakpoint! addr)}
+                       :on-click #(breaks/toggle-exec-breakpoint! addr)}
                   "●"])
                [:td {:style (merge muted {:padding "1px 6px 1px 2px" :width "14px"})
                      :title (case state :next "Runs next" :done "Already run" nil)}
@@ -283,7 +286,7 @@
          (some-> target (hex 4))
          (when target
            [:button {:title "Stop when this runs" :style {:font-size "10px" :margin-left "4px"}
-                     :on-click #(console/add-breakpoint! {:kind :exec :addr target})} "●"])]
+                     :on-click #(breaks/add-breakpoint! {:kind :exec :addr target})} "●"])]
         [:td {:style (merge muted {:padding "2px 0" :font-size "12px" :max-width "240px"})} about]])]]])
 
 ;; ---------------------------------------------------------------------------
@@ -335,12 +338,12 @@
   "Checking our console against jsnes as you play."
   [_tick]
   (let [{:keys [running? stopped frames result]} (:compare @db)
-        checking (console/compared-frames)]
+        checking (checking/compared-frames)]
     [:div {:style {:margin-top "8px"}}
      (if checking
        [:div [:span {:style {:color "#1a7f37" :font-weight "bold"}} "Checking against jsnes: "]
         checking " frames the same so far. "
-        [:button {:on-click #(console/stop-comparing! "you stopped it")} "Stop checking"]]
+        [:button {:on-click #(checking/stop! "you stopped it")} "Stop checking"]]
        [:div
         [:button {:on-click console/compare!
                   :title "Start the game again on our console, with jsnes running beside it, fed the same buttons. After every frame, RAM and the picture are compared; the game pauses at the first difference."}
@@ -373,7 +376,7 @@
          "and slower than jsnes: it's written to be read, not yet to be fast."]
         "jsnes is a JavaScript emulator, with sound and many cartridge types. Switching starts the game again from power on.")]
      (when (= which :nes-cljs)
-       [compare-panel @console/inspect-tick])]))
+       [compare-panel @current/inspect-tick])]))
 
 (defn- cpu-choice
   "`_tick` is the inspector tick, so the counts here refresh."
@@ -400,7 +403,7 @@
          "."]
         "The rest of the console (PPU, sound, cartridge) is jsnes either way. You can switch while a game runs.")]
      [:div {:style {:margin-top "6px" :display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap"}}
-      [:button {:disabled running? :on-click #(console/compare-cpus! 600)
+      [:button {:disabled running? :on-click #(checking/compare-cpus! 600)
                 :title "Run this game from power on with each CPU for 600 frames (10 seconds of game time), comparing the picture and RAM after every frame"}
        "Compare the two CPUs"]
       (cond
@@ -418,15 +421,15 @@
 ;; ---------------------------------------------------------------------------
 
 (defn cpu-view []
-  @console/inspect-tick
-  (if-let [emulator (console/emulator-instance)]
+  @current/inspect-tick
+  (if-let [emulator (current/emulator-instance)]
     (let [{:keys [a x y sp pc p cycles] :as regs} (emu/cpu-state emulator)
           {:keys [scanline dot frame]} (emu/ppu-state emulator)
           paused? (= :paused (:status @db))]
       [:div
        [machine-choice]
        (when-not (= :nes-cljs (console/machine-in-use))
-         [cpu-choice emulator @console/inspect-tick])
+         [cpu-choice emulator @current/inspect-tick])
        (when-not paused?
          [:p {:style (merge muted {:margin-top 0 :font-size "14px"})}
           "Pause, then use " [:strong "Step instruction"]

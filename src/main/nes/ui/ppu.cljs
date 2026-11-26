@@ -1,7 +1,7 @@
 (ns nes.ui.ppu
   "The PPU tab: the PPU's settings and status registers decoded bit by
   bit, and where it is in drawing the picture."
-  (:require [nes.app.console :as console]
+  (:require [nes.app.current :as current]
             [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.ppu.registers :as ppu-registers]
@@ -163,8 +163,8 @@
     :else "on the pre-render line, getting ready for the next picture"))
 
 (defn ppu-view []
-  @console/inspect-tick
-  (if-let [e (console/emulator-instance)]
+  @current/inspect-tick
+  (if-let [e (current/emulator-instance)]
     (let [{:keys [ctrl mask status]} (emu/ppu-registers e)
           {:keys [scanline dot frame]} (emu/ppu-state e)
           paused? (= :paused (:status @db))]

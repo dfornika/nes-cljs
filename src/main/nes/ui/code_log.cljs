@@ -8,6 +8,8 @@
             [nes.ui.canvas :refer [pixel-canvas]]
             [nes.code-log :as cl]
             [nes.app.console :as console]
+            [nes.app.breakpoints :as breaks]
+            [nes.app.current :as current]
             [zeropage.disasm :as disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.inspect.routines :as routines]
@@ -133,7 +135,7 @@
          [:span {:style muted} "file offset " (offset-text offset) " · bank " bank " · "
           size " bytes, " instructions " instructions, " exits (if (= 1 exits) " exit" " exits")]]
         [:div {:style {:display "flex" :gap "6px"}}
-         [:button {:on-click #(console/add-breakpoint! {:kind :exec :addr cpu-addr})
+         [:button {:on-click #(breaks/add-breakpoint! {:kind :exec :addr cpu-addr})
                    :title "Stop before this routine runs (if its bank is switched in)"} "● break"]
          [:button {:on-click #(reset! selected nil)} "×"]]]
        [:div {:style {:font-size "13px" :margin "6px 0"}}
@@ -230,7 +232,7 @@
      (when (> (count rows) 300) [:div {:style (merge muted {:font-size "12px"})} "(first 300)"])]))
 
 (defn- find-routines [log]
-  (when-let [e (console/emulator-instance)]
+  (when-let [e (current/emulator-instance)]
     (let [^js file (emu/rom-file e)
           header-size (or (:header-size log) 16)
           prg-size (* 16384 (get-in @db [:rom :header :prg-banks]))
@@ -243,7 +245,7 @@
         selected (r/atom nil)     ; PRG offset of the routine being looked at
         filters (r/atom {:sort-by-name "most called"})]
     (fn []
-      (let [tick @console/inspect-tick
+      (let [tick @current/inspect-tick
             recording? (:code-logging? @db)
             log (console/code-log)
             rom-key (get-in @db [:rom :sha1])
@@ -257,12 +259,12 @@
           "there to find more, including code that hasn't run yet."]
          [:div {:style {:display "flex" :gap "8px" :align-items "center" :flex-wrap "wrap" :margin-bottom "10px"}}
           [:button {:on-click #(console/log-code! (not recording?))
-                    :disabled (nil? (console/emulator-instance))
+                    :disabled (nil? (current/emulator-instance))
                     :style {:font-weight "bold" :color (when-not recording? "#cf222e")}}
            (if recording? "■ Stop recording" "● Record")]
           [:button {:on-click #(do (console/clear-code-log!) (reset! result nil)) :disabled (nil? log)} "Clear"]
           [:button {:on-click #(reset! result {:rom rom-key :value (find-routines log)})
-                    :disabled (nil? (console/emulator-instance))
+                    :disabled (nil? (current/emulator-instance))
                     :title "Follow the code from the interrupt vectors and everything recorded"}
            (if res "Find routines again" "Find routines")]
           [:button {:on-click #(download! log) :disabled (nil? log)
@@ -298,7 +300,7 @@
          (cond
            res [:div [:h4 {:style {:margin "0 0 6px"}} "Routines"]
                 [routines-section res selected filters]]
-           (console/emulator-instance)
+           (current/emulator-instance)
            [:p {:style muted} (if log
                                 "Press Find routines to follow the code from what's been recorded."
                                 "Record some play first, or press Find routines to follow the code from the interrupt vectors alone.")]

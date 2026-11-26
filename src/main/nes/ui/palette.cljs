@@ -3,7 +3,7 @@
   RAM that choose which of them the game is using."
   (:require [reagent.core :as r]
             [nes.inspect.chr :as chr]
-            [nes.app.console :as console]
+            [nes.app.current :as current]
             [zeropage.disasm :refer [hex]]
             [nes.emulator :as emu]))
 
@@ -88,8 +88,8 @@
                  :label (subs (hex index 2) 1) :highlight? (= h index)}])]]))
 
 (defn palette-view []
-  @console/inspect-tick
-  (if-let [e (console/emulator-instance)]
+  @current/inspect-tick
+  (if-let [e (current/emulator-instance)]
     (let [master (emu/master-palette e)
           mem (emu/ppu-memory e)
           ram (mapv #(bit-and 0x3F (aget mem (+ 0x3F00 %))) (range 32))
