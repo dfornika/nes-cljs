@@ -369,7 +369,7 @@
       (if (= which :nes-cljs)
         [:span "Our 6502 (" [:span {:style mono} "nes.cpu.core"] ") and our PPU ("
          [:span {:style mono} "nes.ppu.core"] ", one dot at a time), wired together in "
-         [:span {:style mono} "nes.machine"] ". No sound yet, cartridges with mapper 0 only, "
+         [:span {:style mono} "nes.machine"] ". No sound yet, cartridges with mappers 0 and 2 only, "
          "and slower than jsnes: it's written to be read, not yet to be fast."]
         "jsnes is a JavaScript emulator, with sound and many cartridge types. Switching starts the game again from power on.")]
      (when (= which :nes-cljs)
