@@ -27,3 +27,18 @@
       (and y (< y (- stick-threshold))) (conj :up)
       (and y (> y stick-threshold)) (conj :down))))
 
+
+(defn usable?
+  "Is this a gamepad we can play with? Browsers also list other devices
+  that have buttons (headsets, for one): they have no standard layout and
+  no sticks, and would otherwise take player 1's place. `mapping` is the
+  Gamepad's .mapping, `axes` its axes, as plain data so this can be
+  tested without a browser.
+
+  Pads with the standard layout are always fine. Older USB pads often
+  report a mapping of \"\" but have a stick or a D-pad on two axes or
+  more, so those are kept too. (A pad with no mapping whose D-pad shows
+  up only as buttons would be left out. If one turns up, a list of
+  device ids to ignore would be the way round it.)"
+  [mapping axes]
+  (or (= "standard" mapping) (>= (count axes) 2)))
