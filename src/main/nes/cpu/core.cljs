@@ -3,7 +3,7 @@
 
   The NES's CPU (a Ricoh 2A03) is a 6502 without decimal mode. This
   namespace runs its 151 official instructions and 93 unofficial ones
-  (see nes.cpu.opcodes), one at a time, with the right number of cycles
+  (see zeropage.opcodes), one at a time, with the right number of cycles
   for each, and takes interrupts (NMI, IRQ, RESET).
 
   It doesn't know anything about the rest of the NES. It talks to memory
@@ -36,7 +36,7 @@
     #js {:a 0 :x 0 :y 0 :sp 0xFD :pc 0xC000 :p 0x24 :cycles 0}
 
   `p` is the status register as one byte: N V - B D I Z C, bit 7 first."
-  (:require [nes.cpu.opcodes :as ops]))
+  (:require [zeropage.opcodes :as ops]))
 
 ;; Status flag bits
 (def C 0x01)   ; carry
@@ -54,7 +54,7 @@
   #js {:a 0 :x 0 :y 0 :sp 0xFD :pc 0 :p 0x24 :cycles 0})
 
 ;; ---------------------------------------------------------------------------
-;; Decoding tables: built once from nes.cpu.opcodes, as arrays indexed by
+;; Decoding tables: built once from zeropage.opcodes, as arrays indexed by
 ;; opcode, so decoding an instruction is two array lookups.
 
 (def ^:private base-cycles

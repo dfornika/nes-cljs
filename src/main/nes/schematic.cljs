@@ -10,7 +10,7 @@
   (:require [clojure.string :as str]
             [reagent.core :as r]
             [nes.console :as console]
-            [nes.cpu.disasm :refer [hex]]
+            [zeropage.disasm :refer [hex]]
             [nes.memory-map :as memory-map]
             [nes.memory-view :as memory-view]
             [nes.registers :as registers]

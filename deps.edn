@@ -1,6 +1,11 @@
 {:paths ["src/main" "resources"]
  :deps {org.clojure/clojurescript {:mvn/version "1.12.145"}
         org.clojure/core.async {:mvn/version "1.9.865"}
+        ;; the 6502's opcode table and disassembler (zeropage.opcodes,
+        ;; zeropage.disasm), and the CPU interface nes.cpu.zeropage
+        ;; implements. From the toolkit repo: a sibling checkout until
+        ;; zeropage is pushed, then :git/url + :git/sha + :deps/root "libs/zeropage"
+        io.github.dfornika/zeropage {:local/root "../nes-gamedev-toolkit-clj/libs/zeropage"}
         cljs-http/cljs-http {:mvn/version "0.1.48"}
         reagent/reagent {:mvn/version "2.0.1"
                          :exclusions [cljsjs/react cljsjs/react-dom]}

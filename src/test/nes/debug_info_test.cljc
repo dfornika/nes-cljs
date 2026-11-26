@@ -1,6 +1,6 @@
 (ns nes.debug-info-test
   (:require [clojure.test :refer [deftest is testing]]
-            [nes.cpu.disasm :as disasm]
+            [zeropage.disasm :as disasm]
             [nes.debug-info :as di]
             [nes.lens :as lens]
             [nes.sample-roms :as sample]))

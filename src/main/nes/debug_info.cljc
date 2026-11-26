@@ -178,7 +178,7 @@
 (def ^:private stores #{:sta :stx :sty :sax})
 
 (defn namer
-  "A function for nes.cpu.disasm's `name-of` argument: (f instruction addr)
+  "A function for zeropage.disasm's `name-of` argument: (f instruction addr)
   -> the name to show for an address in that instruction's operand."
   [table]
   (fn [{:keys [mnemonic]} addr]

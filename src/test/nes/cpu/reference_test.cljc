@@ -1,7 +1,7 @@
 (ns nes.cpu.reference-test
   (:require [clojure.test :refer [deftest is]]
-            [nes.cpu.disasm :as disasm]
-            [nes.cpu.opcodes :as ops]
+            [zeropage.disasm :as disasm]
+            [zeropage.opcodes :as ops]
             [nes.cpu.reference :as ref]))
 
 (defn- decode [bytes]

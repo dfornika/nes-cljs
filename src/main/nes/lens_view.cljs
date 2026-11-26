@@ -4,7 +4,7 @@
   (:require [reagent.core :as r]
             [nes.breakpoints-view :refer [stop-on-write-button]]
             [nes.console :as console]
-            [nes.cpu.disasm :refer [hex]]
+            [zeropage.disasm :refer [hex]]
             [nes.lens :as lens]
             [nes.memory-view :as memory-view]
             [nes.snapshot :as snapshot]

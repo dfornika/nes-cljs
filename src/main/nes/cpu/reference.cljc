@@ -7,7 +7,7 @@
   BEQ = Branch if EQual (to zero)."
   (:require [nes.util :as util]
             [clojure.string :as str]
-            [nes.cpu.opcodes :as ops]
+            [zeropage.opcodes :as ops]
             [nes.registers :as registers]))
 
 (def categories
@@ -114,7 +114,7 @@
    :nop {:name "No operation" :category :other :does "nothing" :flags ""}})
 
 (def unofficial-instructions
-  "The unofficial instructions (see nes.cpu.opcodes): mnemonic -> {:name
+  "The unofficial instructions (see zeropage.opcodes): mnemonic -> {:name
   :does :flags :about}. NOP and SBC have unofficial opcodes too, but are
   described above."
   {:lax {:name "Load A and X" :does "A = X = M" :flags "N Z"}
@@ -237,7 +237,7 @@
 (def ^:private flag-bit {:n 7 :v 6 :z 1 :c 0})
 
 (defn explain
-  "Instruction `ins` (from nes.cpu.disasm/decode) in plain English. Pass
+  "Instruction `ins` (from zeropage.disasm/decode) in plain English. Pass
   `now` = {:regs (cpu registers) :peek (fn [addr] byte)} for the
   instruction about to run, to include the actual addresses, values and
   whether a branch will be taken."

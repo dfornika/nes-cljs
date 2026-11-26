@@ -8,7 +8,7 @@
             [nes.canvas :refer [pixel-canvas]]
             [nes.code-log :as cl]
             [nes.console :as console]
-            [nes.cpu.disasm :as disasm :refer [hex]]
+            [zeropage.disasm :as disasm :refer [hex]]
             [nes.emulator :as emu]
             [nes.routines :as routines]
             [nes.state :refer [db]]))
