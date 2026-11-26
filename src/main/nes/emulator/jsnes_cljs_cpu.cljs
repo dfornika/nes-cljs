@@ -19,7 +19,8 @@
   The timing rules are jsnes's (see emulate() in jsnes/src/cpu.js). Only
   the 12 opcodes that jam a real CPU are left to jsnes, which stops the
   game, as a real NES would."
-  (:require [nes.cpu.core :as core]))
+  (:require [nes.cpu.core :as core]
+            [nes.cpu.registers :refer [reg set-reg!]]))
 
 (defn- peek-opcode
   "The opcode at `pc`, read without a bus access."
@@ -70,19 +71,19 @@
         s (core/create)
         bus (bus-for cpu ppu)
         regs-in! (fn []
-                   (set! (.-a s) (.-REG_ACC cpu))
-                   (set! (.-x s) (.-REG_X cpu))
-                   (set! (.-y s) (.-REG_Y cpu))
-                   (set! (.-sp s) (bit-and (.-REG_SP cpu) 0xFF))
-                   (set! (.-pc s) (bit-and (inc (.-REG_PC cpu)) 0xFFFF))  ; jsnes keeps PC one less
-                   (set! (.-p s) (.getStatus cpu)))
+                   (set-reg! s :a (.-REG_ACC cpu))
+                   (set-reg! s :x (.-REG_X cpu))
+                   (set-reg! s :y (.-REG_Y cpu))
+                   (set-reg! s :sp (bit-and (.-REG_SP cpu) 0xFF))
+                   (set-reg! s :pc (bit-and (inc (.-REG_PC cpu)) 0xFFFF))  ; jsnes keeps PC one less
+                   (set-reg! s :p (.getStatus cpu)))
         regs-out! (fn []
-                    (set! (.-REG_ACC cpu) (.-a s))
-                    (set! (.-REG_X cpu) (.-x s))
-                    (set! (.-REG_Y cpu) (.-y s))
-                    (set! (.-REG_SP cpu) (.-sp s))
-                    (set! (.-REG_PC cpu) (bit-and (dec (.-pc s)) 0xFFFF))
-                    (.setStatus cpu (.-p s)))]
+                    (set! (.-REG_ACC cpu) (reg s :a))
+                    (set! (.-REG_X cpu) (reg s :x))
+                    (set! (.-REG_Y cpu) (reg s :y))
+                    (set! (.-REG_SP cpu) (reg s :sp))
+                    (set! (.-REG_PC cpu) (bit-and (dec (reg s :pc)) 0xFFFF))
+                    (.setStatus cpu (reg s :p)))]
     (set! (.-emulate cpu)
           (fn []
             (cond
@@ -130,7 +131,7 @@
                   (set! (.-_dmcFetchCycles cpu) (._cyclesToNextDmcFetch cpu))
                   (let [cycles (or (core/step! s bus)
                                    (throw (js/Error. (str "Game crashed, invalid opcode at address $"
-                                                          (.toString (bit-and (dec (.-pc s)) 0xFFFF) 16)))))
+                                                          (.toString (bit-and (dec (reg s :pc)) 0xFFFF) 16)))))
                         ;; PPU time for cycles with no bus access (as jsnes does)
                         _ (when (< (.-instrBusCycles cpu) cycles)
                             (let [missing (* 3 (- cycles (.-instrBusCycles cpu)))]

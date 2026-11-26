@@ -12,6 +12,7 @@
   Compare against main by running it on both."
   (:require [cljs.test :refer [deftest is]]
             [nes.cpu.core :as cpu]
+            [nes.cpu.registers :refer [reg set-reg!]]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
             [nes.emulator.machine :as machine]))
@@ -28,7 +29,7 @@
         s (cpu/create)]
     (.set mem (.subarray rom 16 (+ 16 16384)) 0x8000)
     (.set mem (.subarray rom 16 (+ 16 16384)) 0xC000)
-    (set! (.-pc s) 0xC000)
+    (set-reg! s :pc 0xC000)
     (dotimes [_ 8991] (cpu/step! s bus))))
 
 (defn- frames [create cpu n]

@@ -6,7 +6,8 @@
   nestest is in test-roms/nestest (see the README there). NESTEST_DIR can
   point somewhere else."
   (:require [cljs.test :refer [deftest is]]
-            [nes.cpu.core :as cpu]))
+            [nes.cpu.core :as cpu]
+            [nes.cpu.registers :refer [set-reg!]]))
 
 (def ^:private fs (js/require "fs"))
 (def ^:private path (js/require "path"))
@@ -42,15 +43,13 @@
       (.set mem (.subarray rom 16 (+ 16 16384)) 0x8000)
       (.set mem (.subarray rom 16 (+ 16 16384)) 0xC000)
       ;; nestest's automatic mode starts at $C000, after RESET's 7 cycles
-      (set! (.-pc s) 0xC000)
-      (set! (.-cycles s) 7)
-      (let [mismatch (loop [[e & more] expected n 0]
+      (set-reg! s :pc 0xC000)
+      (let [mismatch (loop [[e & more] expected n 0 cycles 7]
                        (if-not e
                          nil
-                         (let [actual {:pc (.-pc s) :a (.-a s) :x (.-x s) :y (.-y s)
-                                       :p (.-p s) :sp (.-sp s) :cycles (.-cycles s)}]
+                         (let [actual (assoc (cpu/registers s) :cycles cycles)]
                            (if (= actual (dissoc e :unofficial? :line))
-                             (do (cpu/step! s bus) (recur more (inc n)))
+                             (let [c (cpu/step! s bus)] (recur more (inc n) (+ cycles c)))
                              {:line (inc n) :expected (:line e) :actual actual}))))]
         (is (nil? mismatch) (str "differs from nestest.log: " (pr-str mismatch)))
         ;; nestest's own verdict: an error code at $02 and $03, 0 if all passed

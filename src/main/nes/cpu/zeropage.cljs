@@ -35,20 +35,13 @@
   "nes.cpu.core on `bus` ({:read :write}), as a zeropage.cpu/Cpu. Unlike
   zeropage's simple CPU it also runs the unofficial opcodes."
   [bus]
-  (let [^js s (core/create)
+  (let [s (core/create)
         b (core-bus bus)]
     (reify cpu/Cpu
       (registers [_]
-        {:a (.-a s) :x (.-x s) :y (.-y s) :sp (.-sp s) :pc (.-pc s) :p (.-p s)})
+        (core/registers s))
       (set-registers! [this regs]
-        (doseq [[k v] regs]
-          (case k
-            :a (set! (.-a s) v)
-            :x (set! (.-x s) v)
-            :y (set! (.-y s) v)
-            :sp (set! (.-sp s) v)
-            :pc (set! (.-pc s) v)
-            :p (set! (.-p s) v)))
+        (core/set-registers! s (select-keys regs [:a :x :y :sp :pc :p]))
         this)
       (step! [_] (core/step! s b))
       (nmi! [_] (core/nmi! s b))
