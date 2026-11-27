@@ -1,6 +1,7 @@
 (ns nes.emulator.machine
   "An `Emulator` backed by NES.cljs's own console (nes.machine): our CPU,
-  our PPU, mapper 0 cartridges, and no sound yet.
+  our PPU, the cartridge types in nes.cartridge (mappers 0, 2 and 3), and
+  no sound yet.
 
   It does what nes.emulator.jsnes does, through the same protocols, so the
   app can use either. A few things only jsnes has so far: sound, the bus

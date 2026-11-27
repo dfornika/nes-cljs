@@ -12,7 +12,8 @@
             [nes.inspect.compare :as compare]
             [nes.emulator :as emu]
             [nes.emulator.jsnes :as jsnes]
-            [nes.emulator.machine :as machine]))
+            [nes.emulator.machine :as machine]
+            [zeropage.asm :as asm]))
 
 (defn- pair
   "jsnes and our console, each with `game` (a sample game's name, or a
@@ -130,3 +131,82 @@
       (is (same-ram? 4 :b) "and back to the menu")
       (is (same-ram? 30)))
     (is (< 1 (count @banks)) (str "it switched banks: " (sort @banks)))))
+
+(defn- cnrom-test-rom
+  "A tiny mapper 3 (CNROM) program, as an iNES file: it fills the screen
+  with all 256 tiles, then every 16 frames switches to the next of four
+  8 KB tile banks. Each bank's tiles are a different made-up pattern, so
+  each switch changes the whole picture.
+
+  Except the top row of tiles, which is tile 0, blank in every bank: jsnes
+  leaves line 0 black where our PPU draws it, and which is right is an
+  open question (TODO.md, under step 7)."
+  []
+  (let [ppu {:ctrl 0x2000 :mask 0x2001 :status 0x2002 :scroll 0x2005 :addr 0x2006 :data 0x2007
+             :frames 0x00}
+        set-addr (fn [a] [[:lda [:imm (bit-shift-right a 8)]] [:sta :addr]
+                          [:lda [:imm (bit-and a 0xFF)]] [:sta :addr]])
+        program [[:label :reset]
+                 [:sei] [:cld] [:ldx [:imm 0xFF]] [:txs]
+                 [:lda [:imm 0]] [:sta :frames]
+                 ;; wait for the PPU to warm up: two vblanks
+                 [:bit :status]
+                 [:label :vblank-1] [:bit :status] [:bpl :vblank-1]
+                 [:label :vblank-2] [:bit :status] [:bpl :vblank-2]
+                 ;; all 32 palette entries
+                 (set-addr 0x3F00)
+                 [:ldx [:imm 0]]
+                 [:label :palette] [:lda :colours :x] [:sta :data] [:inx] [:cpx [:imm 32]] [:bne :palette]
+                 ;; nametable 0 and its attributes (1 KB): a row of tile 0,
+                 ;; then 0, 1, ... 255 over and over
+                 (set-addr 0x2000)
+                 [:lda [:imm 0]] [:ldx [:imm 32]]
+                 [:label :top-row] [:sta :data] [:dex] [:bne :top-row]
+                 [:ldy [:imm 3]]
+                 [:label :page] [:ldx [:imm 0]]
+                 [:label :tile] [:txa] [:sta :data] [:inx] [:bne :tile]
+                 [:dey] [:bne :page]
+                 [:label :last-part] [:txa] [:sta :data] [:inx] [:cpx [:imm 224]] [:bne :last-part]
+                 ;; turn the screen on in vblank, as games do
+                 [:label :vblank-3] [:bit :status] [:bpl :vblank-3]
+                 [:lda [:imm 0]] [:sta :scroll] [:sta :scroll]
+                 [:lda [:imm 0x80]] [:sta :ctrl]          ; NMI on
+                 [:lda [:imm 0x0A]] [:sta :mask]          ; background on
+                 [:label :forever] [:jmp :forever]
+                 [:label :nmi]
+                 [:inc :frames]
+                 [:lda :frames] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:and [:imm 3]]
+                 ;; write the bank number over a byte that holds it already
+                 ;; (on a real board, ROM and mapper both answer the write)
+                 [:tax] [:lda :banks :x] [:sta :banks :x]
+                 [:rti]
+                 [:label :banks] [:db 0 1 2 3]
+                 [:label :colours] [:db (repeat 2 [0x0F 0x16 0x2A 0x12 0x0F 0x27 0x1A 0x02
+                                                   0x0F 0x30 0x21 0x14 0x0F 0x19 0x28 0x06])]
+                 [:org 0xFFFA] [:dw :nmi :reset :nmi]]
+        prg (:bytes (asm/assemble program {:org 0xC000 :symbols ppu}))
+        ;; 8 KB a bank: 512 tiles (the screen uses the first 256)
+        chr (for [b (range 4), t (range 512), plane (range 2), row (range 8)]
+              (if (zero? t)
+                0
+                (bit-and 0xFF (if (zero? plane)
+                              (+ (* t 7) (* row 13) (* b 61))
+                              (bit-xor (+ (* t 3) (* row 5) (* b 101)) 0x55)))))]
+    (assert (= 0x4000 (count prg)))
+    (assert (= (* 4 0x2000) (count chr)))
+    (js/Uint8Array.from (clj->js (concat [0x4E 0x45 0x53 0x1A 1 4 0x30 0 0 0 0 0 0 0 0 0] prg chr)))))
+
+(deftest cnrom
+  ;; Mapper 3 (CNROM): the tiles switch, so this compares the pictures
+  ;; (and RAM) with jsnes every frame, through all four tile banks and
+  ;; back to the first. Each look is taken between two switches (a
+  ;; picture shows the bank from before the frame's NMI).
+  (let [p (pair (cnrom-test-rom))
+        ^js m (.-m ^js (.-state (:emu (:ours p))))
+        seen (atom {})]                         ; bank -> the picture's hash
+    (is (nil? (play! p 8)) "the first 8 frames")
+    (dotimes [i 5]
+      (is (nil? (play! p 16)) (str "16 more frames, " (inc i) " switches in"))
+      (swap! seen assoc (.-bank ^js (:cart m)) (hash (vec @(:pic (:ours p))))))
+    (is (= #{0 1 2 3} (set (keys @seen))) "it used all four tile banks")
+    (is (= 4 (count (set (vals @seen)))) "and each looked different")))
