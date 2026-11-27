@@ -92,7 +92,8 @@
     any changes made by `rom-poke!`. Read it, never write it.")
   (mirroring [emu]
     "How the cartridge arranges the nametables right now: :horizontal,
-    :vertical, :single-screen or :four-screen. (Some mappers change it.)"))
+    :vertical, :single-screen (the first 1 KB of nametable RAM),
+    :single-screen-b (the second) or :four-screen. (Some mappers change it.)"))
 
 (defprotocol Poke
   "Changing the emulated machine's memory from outside, for experiments."

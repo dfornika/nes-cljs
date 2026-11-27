@@ -1,6 +1,6 @@
 (ns nes.emulator.machine
   "An `Emulator` backed by NES.cljs's own console (nes.machine): our CPU,
-  our PPU, the cartridge types in nes.cartridge (mappers 0, 2 and 3), and
+  our PPU, the cartridge types in nes.cartridge (mappers 0, 1, 2 and 3), and
   no sound yet.
 
   It does what nes.emulator.jsnes does, through the same protocols, so the
@@ -85,7 +85,8 @@
   (ppu-registers [_]
     (select-keys (r/registers (ppu-of (.-m state))) [:ctrl :mask :status]))
   (rom-file [_] (.-file state))
-  (mirroring [_] (:mirroring (rom/parse-header (.-file state))))
+  (mirroring [_]
+    (cart/current-mirroring (:cart (.-m state)) (:mirroring (rom/parse-header (.-file state)))))
 
   emu/Poke
   (cpu-poke! [_ addr value]

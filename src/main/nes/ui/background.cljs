@@ -28,6 +28,7 @@
   {:vertical "Vertical mirroring: $2000 and $2800 are the same memory, and so are $2400 and $2C00. Room for two screens side by side, for scrolling sideways."
    :horizontal "Horizontal mirroring: $2000 and $2400 are the same memory, and so are $2800 and $2C00. Room for two screens stacked, for scrolling up and down."
    :single-screen "Single-screen: all four nametables are the same memory."
+   :single-screen-b "Single-screen: all four nametables are the same memory (the second half of nametable RAM)."
    :four-screen "Four-screen: the cartridge adds RAM so all four nametables are separate."})
 
 ;; ---------------------------------------------------------------------------
