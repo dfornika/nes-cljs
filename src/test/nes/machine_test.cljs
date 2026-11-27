@@ -210,3 +210,103 @@
       (swap! seen assoc (.-bank ^js (:cart m)) (hash (vec @(:pic (:ours p))))))
     (is (= #{0 1 2 3} (set (keys @seen))) "it used all four tile banks")
     (is (= 4 (count (set (vals @seen)))) "and each looked different")))
+
+(defn- mmc1-test-rom
+  "A tiny mapper 1 (MMC1) program, as an iNES file, that uses each of
+  the chip's registers. Every 16 frames it takes the next of eight steps,
+  k = 0-7, and in its NMI handler:
+
+    - switches program bank k in at $8000, and copies the byte there (each
+      bank's number) to RAM at $10, so the RAM shows the switch
+    - switches 4 KB tile bank k in at $0000 and bank 7 - k at $1000, and
+      draws the background with the first for even k, the second for odd
+    - sets vertical mirroring for k = 0-3 and horizontal for 4-7, while
+      the screen shows the nametable at $2400: that's its own memory with
+      vertical mirroring, and the same as $2000 with horizontal, and the
+      two are filled differently
+
+  It stays where jsnes and a real MMC1 agree (see nes.cartridge/Mmc1):
+  program mode 3, 4 KB tiles, mirroring 2 and 3. And the top row of tiles
+  is blank, as in `cnrom-test-rom`."
+  []
+  (let [syms {:ctrl 0x2000 :mask 0x2001 :status 0x2002 :scroll 0x2005 :addr 0x2006 :data 0x2007
+              :frames 0x00 :k 0x01 :bank-byte 0x10}
+        set-addr (fn [a] [[:lda [:imm (bit-shift-right a 8)]] [:sta :addr]
+                          [:lda [:imm (bit-and a 0xFF)]] [:sta :addr]])
+        ;; A into the MMC1 register at `reg`: five writes, a bit each
+        mmc1! (fn [reg] (concat (apply concat (repeat 4 [[:sta reg] [:lsr :a]])) [[:sta reg]]))
+        ;; a nametable and its attributes (1 KB) from $2000 or $2400: a row
+        ;; of tile 0, then the tiles counting up (or down, with `flip`)
+        fill (fn [label flip]
+               (let [l #(keyword (str (name label) "-" %))]
+                 [(set-addr (if (zero? flip) 0x2000 0x2400))
+                  [:lda [:imm 0]] [:ldx [:imm 32]]
+                  [:label (l "top")] [:sta :data] [:dex] [:bne (l "top")]
+                  [:ldy [:imm 3]]
+                  [:label (l "page")] [:ldx [:imm 0]]
+                  [:label (l "tile")] [:txa] [:eor [:imm flip]] [:sta :data] [:inx] [:bne (l "tile")]
+                  [:dey] [:bne (l "page")]
+                  [:label (l "end")] [:txa] [:eor [:imm flip]] [:sta :data] [:inx] [:cpx [:imm 224]] [:bne (l "end")]]))
+        program [[:label :reset]
+                 [:sei] [:cld] [:ldx [:imm 0xFF]] [:txs]
+                 [:lda [:imm 0]] [:sta :frames]
+                 [:bit :status]
+                 [:label :vblank-1] [:bit :status] [:bpl :vblank-1]
+                 [:label :vblank-2] [:bit :status] [:bpl :vblank-2]
+                 ;; start the MMC1 over, then: 4 KB tiles, program mode 3,
+                 ;; vertical mirroring; tile banks 0 and 7
+                 [:lda [:imm 0x80]] [:sta 0x8000]
+                 [:lda [:imm 0x1E]] (mmc1! 0x8000)
+                 [:lda [:imm 0]] (mmc1! 0xA000)
+                 [:lda [:imm 7]] (mmc1! 0xC000)
+                 (set-addr 0x3F00)
+                 [:ldx [:imm 0]]
+                 [:label :palette] [:lda :colours :x] [:sta :data] [:inx] [:cpx [:imm 32]] [:bne :palette]
+                 (fill :nt0 0)
+                 (fill :nt1 0xFF)
+                 [:label :vblank-3] [:bit :status] [:bpl :vblank-3]
+                 [:lda [:imm 0]] [:sta :scroll] [:sta :scroll]
+                 [:lda [:imm 0x81]] [:sta :ctrl]          ; NMI on, the nametable at $2400
+                 [:lda [:imm 0x0A]] [:sta :mask]          ; background on
+                 [:label :forever] [:jmp :forever]
+                 [:label :nmi]
+                 [:inc :frames]
+                 [:lda :frames] [:lsr :a] [:lsr :a] [:lsr :a] [:lsr :a] [:and [:imm 7]] [:sta :k]
+                 (mmc1! 0xE000)                           ; program bank k
+                 [:lda 0x8000] [:sta :bank-byte]
+                 [:lda :k] (mmc1! 0xA000)                 ; tiles k at $0000
+                 [:lda [:imm 7]] [:sec] [:sbc :k] (mmc1! 0xC000) ; and 7 - k at $1000
+                 [:lda :k] [:lsr :a] [:lsr :a] [:clc] [:adc [:imm 0x1E]] (mmc1! 0x8000) ; mirroring
+                 [:lda :k] [:and [:imm 1]] [:asl :a] [:asl :a] [:asl :a] [:asl :a]
+                 [:ora [:imm 0x81]] [:sta :ctrl]          ; which tiles the background uses
+                 [:rti]
+                 [:label :colours] [:db (repeat 2 [0x0F 0x16 0x2A 0x12 0x0F 0x27 0x1A 0x02
+                                                   0x0F 0x30 0x21 0x14 0x0F 0x19 0x28 0x06])]
+                 [:org 0xFFFA] [:dw :nmi :reset :nmi]]
+        code (:bytes (asm/assemble program {:org 0xC000 :symbols syms}))
+        ;; eight 16 KB banks: 0-6 filled with their number, 7 the code
+        prg (concat (for [b (range 7), _ (range 0x4000)] b) code)
+        ;; eight 4 KB tile banks, 256 tiles each, tile 0 blank in all
+        chr (for [b (range 8), t (range 256), plane (range 2), row (range 8)]
+              (if (zero? t)
+                0
+                (bit-and 0xFF (if (zero? plane)
+                                (+ (* t 7) (* row 13) (* b 61))
+                                (bit-xor (+ (* t 3) (* row 5) (* b 101)) 0x55)))))]
+    (assert (= 0x4000 (count code)))
+    (assert (= (* 8 0x1000) (count chr)))
+    (js/Uint8Array.from (clj->js (concat [0x4E 0x45 0x53 0x1A 8 4 0x10 0 0 0 0 0 0 0 0 0] prg chr)))))
+
+(deftest mmc1
+  ;; Mapper 1 (MMC1): program banks, tile banks and mirroring all switch.
+  ;; Compared with jsnes every frame (RAM and picture) through all eight
+  ;; steps, each look taken between two switches, as in `cnrom`.
+  (let [p (pair (mmc1-test-rom))
+        ^js m (.-m ^js (.-state (:emu (:ours p))))
+        seen (atom {})]                         ; program bank -> the picture's hash
+    (is (nil? (play! p 8)) "the first 8 frames")
+    (dotimes [i 9]
+      (is (nil? (play! p 16)) (str "16 more frames, " (inc i) " switches in"))
+      (swap! seen assoc (.-prg-bank ^js (:cart m)) (hash (vec @(:pic (:ours p))))))
+    (is (= (set (range 8)) (set (keys @seen))) "it went through all eight steps")
+    (is (= 8 (count (set (vals @seen)))) "and each looked different")))

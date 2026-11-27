@@ -302,7 +302,9 @@
       0 :vertical
       1 :horizontal
       2 :four-screen
-      (3 4 5 6) :single-screen
+      3 :single-screen
+      4 :single-screen-b
+      (5 6) :single-screen
       :unknown))
 
   emu/Poke

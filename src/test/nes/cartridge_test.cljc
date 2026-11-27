@@ -85,6 +85,108 @@
       (is (= 9 (memory/video-read c 0x2005))))))
 
 (deftest other-mappers
-  (is (thrown-with-msg? #?(:clj Exception :cljs js/Error) #"Mapper 1 \(MMC1\)"
-        (cart/load (bytes/from (concat [0x4E 0x45 0x53 0x1A 1 1 0x10 0 0 0 0 0 0 0 0 0]
+  (is (thrown-with-msg? #?(:clj Exception :cljs js/Error) #"Mapper 4 \(MMC3\).*only mappers 0, 1, 2 and 3"
+        (cart/load (bytes/from (concat [0x4E 0x45 0x53 0x1A 1 1 0x40 0 0 0 0 0 0 0 0 0]
                                        (repeat (+ 0x4000 0x2000) 0)))))))
+
+(defn- mmc1-write!
+  "Load `value` into the MMC1 register at `addr` the way a game does: five
+  writes, one bit each, lowest first."
+  [c addr value]
+  (doseq [i (range 5)]
+    (cart/cpu-write! c addr (bit-and (bit-shift-right value i) 1))))
+
+(defn- mmc1
+  "An MMC1 cartridge with 16 x 16 KB of program and 128 KB of tiles, each
+  4 KB of tiles filled with its own number (for telling them apart)."
+  []
+  (let [c (cart/load (ines 16 16 0x10))]
+    (doseq [i (range 0x20000)] (bytes/put! (cart/chr c) i (quot i 0x1000)))
+    c))
+
+(deftest mmc1-test
+  (testing "at power on: bank 0 at $8000, the last at $C000, tiles 0 and 1, header's mirroring"
+    (let [c (mmc1)]
+      (is (= [0 15 0 1 :horizontal]
+             [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)
+              (memory/video-read c 0) (memory/video-read c 0x1000)
+              (cart/current-mirroring c :vertical)]))))
+  (testing "a register only changes on the fifth write"
+    (let [c (mmc1)]
+      (doseq [_ (range 4)] (cart/cpu-write! c 0xE000 1))
+      (is (= 0 (cart/cpu-read c 0x8000)))
+      (cart/cpu-write! c 0xE000 0)
+      (is (= 15 (cart/cpu-read c 0x8000)) "0b01111 = 15")))
+  (testing "a write with bit 7 set starts over"
+    (let [c (mmc1)]
+      (cart/cpu-write! c 0xE000 1)
+      (cart/cpu-write! c 0xE000 1)
+      (cart/cpu-write! c 0x8000 0x80)
+      (mmc1-write! c 0xE000 3)
+      (is (= 3 (cart/cpu-read c 0x8000)))))
+  (testing "program mode 3: switch $8000, last bank fixed at $C000"
+    (let [c (mmc1)]
+      (mmc1-write! c 0xE000 5)
+      (is (= [5 15 0xFC] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000) (cart/cpu-read c 0xFFFC)]))))
+  (testing "program mode 2: first bank fixed at $8000, switch $C000"
+    (let [c (mmc1)]
+      (mmc1-write! c 0x8000 0x08)
+      (mmc1-write! c 0xE000 5)
+      (is (= [0 5] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)]))))
+  (testing "32 KB mode: the bank's lowest bit is ignored"
+    (let [c (mmc1)]
+      (mmc1-write! c 0x8000 0x00)
+      (mmc1-write! c 0xE000 5)
+      (is (= [4 5] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)]))))
+  (testing "a mode change applies straight away, and bit 7 sets mode 3"
+    (let [c (mmc1)]
+      (mmc1-write! c 0xE000 5)
+      (mmc1-write! c 0x8000 0x08)
+      (is (= [0 5] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)]))
+      (cart/cpu-write! c 0x8000 0x80)
+      (is (= [5 15] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)]))))
+  (testing "8 KB tiles: the bank's lowest bit is ignored"
+    (let [c (mmc1)]
+      (mmc1-write! c 0xA000 7)
+      (mmc1-write! c 0xC000 20)
+      (is (= [6 7] [(memory/video-read c 0x0010) (memory/video-read c 0x1010)]))))
+  (testing "4 KB tiles: two banks"
+    (let [c (mmc1)]
+      (mmc1-write! c 0x8000 0x1C)
+      (mmc1-write! c 0xA000 7)
+      (mmc1-write! c 0xC000 20)
+      (is (= [7 20] [(memory/video-read c 0x0010) (memory/video-read c 0x1010)]))))
+  (testing "tile ROM can't be written"
+    (let [c (mmc1)]
+      (memory/video-write! c 0x10 0x55)
+      (is (= 0 (memory/video-read c 0x10)))))
+  (testing "mirroring, set by the game"
+    (let [c (mmc1)]
+      (doseq [[bits expected] [[0 :single-screen] [1 :single-screen-b] [2 :vertical] [3 :horizontal]]]
+        (mmc1-write! c 0x8000 (bit-or 0x0C bits))
+        (is (= expected (cart/current-mirroring c :horizontal)))))
+    (let [c (mmc1)]
+      (mmc1-write! c 0x8000 0x0E)                 ; vertical
+      (memory/video-write! c 0x2005 7)
+      (is (= [7 0] [(memory/video-read c 0x2805) (memory/video-read c 0x2405)]))
+      (mmc1-write! c 0x8000 0x0D)                 ; the second 1 KB everywhere
+      (is (= [0 0 0 0] (mapv #(memory/video-read c (+ % 5)) [0x2000 0x2400 0x2800 0x2C00])))
+      (mmc1-write! c 0x8000 0x0C)                 ; the first 1 KB everywhere
+      (is (= [7 7 7 7] (mapv #(memory/video-read c (+ % 5)) [0x2000 0x2400 0x2800 0x2C00])))))
+  (testing "CHR RAM: 8 KB, written through the banks"
+    (let [c (cart/load (ines 8 0 0x10))]
+      (mmc1-write! c 0x8000 0x1C)                 ; 4 KB mode
+      (mmc1-write! c 0xA000 1)                    ; the second 4 KB at $0000,
+      (mmc1-write! c 0xC000 1)                    ; and at $1000
+      (memory/video-write! c 0x1010 9)
+      (is (= [9 9] [(memory/video-read c 0x0010) (memory/video-read c 0x1010)]))))
+  (testing "512 KB of program: bit 4 of the tile bank at $0000 picks the 256 KB half"
+    (let [c (cart/load (ines 32 0 0x10))]
+      (is (= [0 15] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)]))
+      (mmc1-write! c 0xA000 0x10)
+      (mmc1-write! c 0xE000 2)
+      (is (= [18 31] [(cart/cpu-read c 0x8000) (cart/cpu-read c 0xC000)]))))
+  (testing "the RAM at $6000"
+    (let [c (mmc1)]
+      (cart/cpu-write! c 0x6000 0x55)
+      (is (= 0x55 (cart/cpu-read c 0x6000))))))

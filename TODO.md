@@ -238,7 +238,16 @@ played. So combine them.
     - [x] **Mapper 3 (CNROM)** – `nes.cartridge/Cnrom`: switchable tiles. No CNROM game
       among the samples, so `nes.machine-test` assembles a small one (with zeropage.asm)
       and compares it with jsnes through all four tile banks
-    - [ ] Mapper 1 (MMC1), mapper 4 (MMC3)
+    - [x] **Mapper 1 (MMC1)** – `nes.cartridge/Mmc1`: program and tile banks, and mirroring
+      set by the game. Follows the hardware where jsnes doesn't (mirroring 1, the 32 KB
+      mode's bank number; listed in its comments). `nes.machine-test` assembles a program
+      that uses every register and compares it with jsnes
+      - [ ] The chip ignores a write on the cycle right after another one (an INC on
+        $8000-$FFFF); neither we nor jsnes do that, as the cartridge doesn't see CPU cycles
+      - [ ] Bit 4 of the program bank turning the RAM at $6000 off (jsnes leaves it out too)
+      - [ ] Not yet tried on a real MMC1 game, or on blargg's all-in-one test ROMs (which
+        are MMC1)
+    - [ ] Mapper 4 (MMC3): needs IRQs in `nes.machine` and the PPU's A12 line
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
 - [ ] **An enhanced mode** – after our own PPU: options for any ROM (no sprite limit,
