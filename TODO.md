@@ -225,8 +225,16 @@ played. So combine them.
     (`nes.ppu.sprite-search`); blargg's power-on palette
   - [ ] **The odd frame's skipped dot vs. PPUMASK** – `ppu_vbl_nmi/10-even_odd_timing` (#3):
     turning drawing on and off take effect after different delays on a real PPU
-  - [ ] **More test ROMs** – AccuracyCoin; the mapper 1 and 3 ones (`ppu_read_buffer`, the
-    all-in-one `ppu_vbl_nmi`) once we have those mappers; the CPU's interrupt and DMA tests
+  - [ ] **More test ROMs** – AccuracyCoin; the CPU's DMA tests
+  - [ ] **Sprite DMA reads through the bus** – `nes.machine/dma!` copies the page at once
+    with `peek-cpu`, so DMA from $2000-$3FFF doesn't touch the PPU's registers (a real one
+    reads each byte, side effects and all). `ppu_read_buffer` fails #67 on it
+    - Agreed 2026-11-27 to do it properly, later: spread the copy over its 513 cycles (a
+      read, then a write, per byte, each through `read!` and `cycle!`), replacing the
+      `halt` count, so the PPU moves on between reads as on hardware. The quick version
+      (real reads, but all at once) probably isn't enough: #67 is a sprite 0 hit test,
+      so it likely looks at $2002 partway through the copy. jsnes's DMA peeks too, but
+      games copy from RAM, so lockstep with it shouldn't change; `nes.machine-test` checks
   - [ ] **Step 7: more mappers** – see the plan
     - [x] **Mapper 2 (UxROM)** – `nes.cartridge/Uxrom`; the 240p Test Suite runs on our
       console with the same RAM as jsnes every frame (`nes.machine-test`)
@@ -245,8 +253,9 @@ played. So combine them.
       - [ ] The chip ignores a write on the cycle right after another one (an INC on
         $8000-$FFFF); neither we nor jsnes do that, as the cartridge doesn't see CPU cycles
       - [ ] Bit 4 of the program bank turning the RAM at $6000 off (jsnes leaves it out too)
-      - [ ] Not yet tried on a real MMC1 game, or on blargg's all-in-one test ROMs (which
-        are MMC1)
+      - [x] blargg's all-in-one test ROMs (MMC1) are in `test-roms/` (2026-11-27):
+        `instr_test-v5/all_instrs` passes, and `ppu_vbl_nmi` fails only where its single
+        ROM does; three more wait for a sound chip. Not yet tried on a real MMC1 game
     - [ ] Mapper 4 (MMC3): needs IRQs in `nes.machine` and the PPU's A12 line
   - [ ] **Background and Sprites tabs from `nes.ppu.render`** – instead of each decoding
     memory itself (the plan's step 2 suggested it; not done yet)
