@@ -229,6 +229,12 @@ played. So combine them.
   - [ ] **Sprite DMA reads through the bus** – `nes.machine/dma!` copies the page at once
     with `peek-cpu`, so DMA from $2000-$3FFF doesn't touch the PPU's registers (a real one
     reads each byte, side effects and all). `ppu_read_buffer` fails #67 on it
+    - Agreed 2026-11-27 to do it properly, later: spread the copy over its 513 cycles (a
+      read, then a write, per byte, each through `read!` and `cycle!`), replacing the
+      `halt` count, so the PPU moves on between reads as on hardware. The quick version
+      (real reads, but all at once) probably isn't enough: #67 is a sprite 0 hit test,
+      so it likely looks at $2002 partway through the copy. jsnes's DMA peeks too, but
+      games copy from RAM, so lockstep with it shouldn't change; `nes.machine-test` checks
   - [ ] **Step 7: more mappers** – see the plan
     - [x] **Mapper 2 (UxROM)** – `nes.cartridge/Uxrom`; the 240p Test Suite runs on our
       console with the same RAM as jsnes every frame (`nes.machine-test`)
